@@ -172,14 +172,34 @@ impl SolarTime {
     }
 
     /// When a stick's shadow is `shadow_length` times its height plus its
-    /// noon shadow (Asr), in hours after 00:00 UTC.
+    /// noon shadow (Asr), in hours after 00:00 UTC; None if the sun doesn't
+    /// get that high, or only at noon.
     pub fn afternoon(&self, shadow_length: f64) -> Option<f64> {
-        let absolute_degrees = (self.observer.latitude - self.solar.declination.degrees).abs();
-        let tangent = Angle::new(absolute_degrees);
+        // The noon shadow is cast at transit, so the declination is the one
+        // interpolated to transit, which can be most of a day from 0h UTC.
+        let noon_declination = ops::interpolate(
+            self.solar.declination.degrees,
+            self.prev_solar.declination.degrees,
+            self.next_solar.declination.degrees,
+            self.transit / 24.0,
+        );
+        let tangent = Angle::new((self.observer.latitude - noon_declination).abs());
         let inverse = shadow_length + tangent.radians().tan();
         let angle = Angle::from_radians((1.0 / inverse).atan());
 
+        // The whole disc above the horizon (the hour angle is the center's),
+        // the sun getting that high, and after noon.
+        let solar_semidiameter = 16.0 / 60.0;
+        let max_altitude = ops::altitude_of_celestial_body(
+            self.observer.latitude_angle(),
+            Angle::new(noon_declination),
+            Angle::new(0.0),
+        );
+        if !(angle.degrees > solar_semidiameter) || max_altitude.degrees < angle.degrees {
+            return None;
+        }
         self.time_for_solar_angle(angle, true)
+            .filter(|&hours| hours > self.transit)
     }
 }
 

@@ -168,7 +168,7 @@ impl Day {
             dhuhr: today.transit,
             asr: today
                 .afternoon(parameters.madhab.shadow().into())
-                .unwrap_or(today.transit),
+                .ok_or(Error::NoAsr(date))?,
             maghrib,
             isha,
         })
@@ -363,7 +363,7 @@ mod tests {
 
         assert_eq!(
             clock(&times),
-            ["10:48", "12:16", "17:33", "20:20", "22:43", "0:05"]
+            ["10:48", "12:16", "17:33", "20:19", "22:43", "0:05"]
         );
     }
 
@@ -379,7 +379,7 @@ mod tests {
 
         assert_eq!(
             clock(&times),
-            ["6:34", "8:19", "11:25", "12:36", "14:25", "16:02"]
+            ["6:34", "8:19", "11:25", "12:35", "14:25", "16:02"]
         );
     }
 
@@ -541,6 +541,20 @@ mod tests {
         assert_eq!(
             september.time(Prayer::Isha),
             Utc.with_ymd_and_hms(2026, 9, 14, 22, 6, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn an_asr_the_sun_cant_reach_is_an_error() {
+        // Just south of the Arctic Circle at the December solstice the sun
+        // rises but never gets high enough for the Asr shadow. salah 0.7
+        // gave Dhuhr's time for Asr.
+        let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
+        let jokkmokk = Coordinates::new(66.61, 19.82).unwrap();
+        let day = date(2026, 12, 21);
+        assert_eq!(
+            PrayerTimes::new(day, jokkmokk, params),
+            Err(Error::NoAsr(day))
         );
     }
 

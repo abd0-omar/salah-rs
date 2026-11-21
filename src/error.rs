@@ -21,6 +21,9 @@ pub enum Error {
     SunNeverRises(NaiveDate),
     /// The sun stays above the horizon all day (midnight sun).
     SunNeverSets(NaiveDate),
+    /// The sun doesn't get high enough for the Asr shadow, or only at noon
+    /// (near the polar circles in winter).
+    NoAsr(NaiveDate),
 }
 
 impl fmt::Display for Error {
@@ -34,6 +37,9 @@ impl fmt::Display for Error {
             ),
             Error::SunNeverRises(date) => write!(f, "the sun doesn't rise on {date}"),
             Error::SunNeverSets(date) => write!(f, "the sun doesn't set on {date}"),
+            Error::NoAsr(date) => {
+                write!(f, "the sun doesn't get high enough for Asr on {date}")
+            }
         }
     }
 }
