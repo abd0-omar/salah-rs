@@ -4,14 +4,14 @@
 // Copyright (c) 2019-2022 Farhan Ahmed. All rights reserved.
 //
 
-use chrono::{Datelike, Utc, Weekday};
+use chrono::Weekday;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// Names of all obligatory prayers,
 /// sunrise, and Qiyam.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(PartialEq, Debug, Copy, Clone)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub enum Prayer {
     Fajr,
     Sunrise,
@@ -19,26 +19,45 @@ pub enum Prayer {
     Asr,
     Maghrib,
     Isha,
+    /// The start of the last third of the night.
     Qiyam,
+    /// The next day's Fajr.
     FajrTomorrow,
 }
 
 impl Prayer {
-    pub fn name(&self) -> String {
+    /// Every time a day's [`PrayerTimes`](crate::PrayerTimes) has, in the
+    /// order they come.
+    pub const IN_ORDER: [Prayer; 8] = [
+        Prayer::Fajr,
+        Prayer::Sunrise,
+        Prayer::Dhuhr,
+        Prayer::Asr,
+        Prayer::Maghrib,
+        Prayer::Isha,
+        Prayer::Qiyam,
+        Prayer::FajrTomorrow,
+    ];
+
+    /// The name, transliterated into English.
+    pub fn name(&self) -> &'static str {
         match self {
-            Prayer::Fajr | Prayer::FajrTomorrow => String::from("Fajr"),
-            Prayer::Sunrise => String::from("Sunrise"),
-            Prayer::Dhuhr => {
-                if Utc::now().weekday() == Weekday::Fri {
-                    String::from("Jumua")
-                } else {
-                    String::from("Dhuhr")
-                }
-            }
-            Prayer::Asr => String::from("Asr"),
-            Prayer::Maghrib => String::from("Maghrib"),
-            Prayer::Isha => String::from("Isha"),
-            Prayer::Qiyam => String::from("Qiyam"),
+            Prayer::Fajr | Prayer::FajrTomorrow => "Fajr",
+            Prayer::Sunrise => "Sunrise",
+            Prayer::Dhuhr => "Dhuhr",
+            Prayer::Asr => "Asr",
+            Prayer::Maghrib => "Maghrib",
+            Prayer::Isha => "Isha",
+            Prayer::Qiyam => "Qiyam",
+        }
+    }
+
+    /// The name on a day that is `weekday` where the prayer is: Dhuhr is
+    /// Jumua on Fridays.
+    pub fn name_on(&self, weekday: Weekday) -> &'static str {
+        match (self, weekday) {
+            (Prayer::Dhuhr, Weekday::Fri) => "Jumua",
+            _ => self.name(),
         }
     }
 }
@@ -48,19 +67,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prayer_name_for_fajr_en_transliteration() {
+    fn prayer_names() {
+        // salah 0.7 named Dhuhr Jumua when the computer's clock read a
+        // Friday in UTC, whatever the day and place of the prayer.
         assert_eq!(Prayer::Fajr.name(), "Fajr");
-        assert_eq!(Prayer::Sunrise.name(), "Sunrise");
-
-        if Utc::now().weekday() == Weekday::Fri {
-            assert_eq!(Prayer::Dhuhr.name(), "Jumua");
-        } else {
-            assert_eq!(Prayer::Dhuhr.name(), "Dhuhr");
-        }
-
-        assert_eq!(Prayer::Asr.name(), "Asr");
-        assert_eq!(Prayer::Maghrib.name(), "Maghrib");
-        assert_eq!(Prayer::Isha.name(), "Isha");
+        assert_eq!(Prayer::FajrTomorrow.name(), "Fajr");
+        assert_eq!(Prayer::Dhuhr.name(), "Dhuhr");
+        assert_eq!(Prayer::Dhuhr.name_on(Weekday::Fri), "Jumua");
+        assert_eq!(Prayer::Dhuhr.name_on(Weekday::Thu), "Dhuhr");
+        assert_eq!(Prayer::Asr.name_on(Weekday::Fri), "Asr");
         assert_eq!(Prayer::Qiyam.name(), "Qiyam");
     }
 }

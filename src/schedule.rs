@@ -9,7 +9,7 @@
 //! This module provides the main objects that are used for calculating
 //! the prayer times.
 
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, TimeDelta, Utc};
 
 use crate::astronomy::ops;
 use crate::astronomy::solar::SolarTime;
@@ -286,48 +286,26 @@ impl PrayerTimes {
         }
     }
 
-    pub fn current(&self) -> Prayer {
-        self.current_time(Utc::now()).expect("Out of bounds")
+    /// The prayer whose time has most recently come at `now`; None
+    /// before this day's Fajr (the night of the day before).
+    pub fn current(&self, now: DateTime<Utc>) -> Option<Prayer> {
+        Prayer::IN_ORDER
+            .into_iter()
+            .rev()
+            .find(|&prayer| self.time(prayer) <= now)
     }
 
-    pub fn next(&self) -> Prayer {
-        match self.current() {
-            Prayer::Fajr => Prayer::Sunrise,
-            Prayer::Sunrise => Prayer::Dhuhr,
-            Prayer::Dhuhr => Prayer::Asr,
-            Prayer::Asr => Prayer::Maghrib,
-            Prayer::Maghrib => Prayer::Isha,
-            Prayer::Isha => Prayer::Qiyam,
-            Prayer::Qiyam => Prayer::FajrTomorrow,
-            _ => Prayer::FajrTomorrow,
-        }
+    /// The next prayer to come after `now`; None once tomorrow's Fajr has
+    /// come (that is the next day's times).
+    pub fn next(&self, now: DateTime<Utc>) -> Option<Prayer> {
+        Prayer::IN_ORDER
+            .into_iter()
+            .find(|&prayer| self.time(prayer) > now)
     }
 
-    pub fn time_remaining(&self) -> (u32, u32) {
-        let next_time = self.time(self.next());
-        let now = Utc::now();
-        let now_to_next = next_time.signed_duration_since(now).num_seconds() as f64;
-        let whole: f64 = now_to_next / 60.0 / 60.0;
-        let fract = whole.fract();
-        let hours = whole.trunc() as u32;
-        let minutes = (fract * 60.0).round() as u32;
-
-        (hours, minutes)
-    }
-
-    fn current_time(&self, time: DateTime<Utc>) -> Option<Prayer> {
-        [
-            Prayer::FajrTomorrow,
-            Prayer::Qiyam,
-            Prayer::Isha,
-            Prayer::Maghrib,
-            Prayer::Asr,
-            Prayer::Dhuhr,
-            Prayer::Sunrise,
-            Prayer::Fajr,
-        ]
-        .into_iter()
-        .find(|&prayer| self.time(prayer) <= time)
+    /// The time from `now` to the next prayer, as in [`next`](Self::next).
+    pub fn time_remaining(&self, now: DateTime<Utc>) -> Option<TimeDelta> {
+        self.next(now).map(|prayer| self.time(prayer) - now)
     }
 }
 
@@ -370,17 +348,42 @@ mod tests {
     #[test]
     fn current_prayer_through_the_day() {
         // Fajr 08:42, sunrise 10:08, Dhuhr 17:21, Asr 22:22, Maghrib 00:32,
-        // Isha 01:57 (UTC).
+        // Isha 01:57, the last third of the night 05:59, the next Fajr
+        // 08:43 (UTC).
         let times = raleigh_2015_07_12();
         let at = |d, h, m| Utc.with_ymd_and_hms(2015, 7, d, h, m, 0).unwrap();
 
-        assert_eq!(times.current_time(at(12, 8, 0)), None);
-        assert_eq!(times.current_time(at(12, 9, 0)), Some(Prayer::Fajr));
-        assert_eq!(times.current_time(at(12, 11, 0)), Some(Prayer::Sunrise));
-        assert_eq!(times.current_time(at(12, 19, 0)), Some(Prayer::Dhuhr));
-        assert_eq!(times.current_time(at(12, 22, 26)), Some(Prayer::Asr));
-        assert_eq!(times.current_time(at(13, 1, 0)), Some(Prayer::Maghrib));
-        assert_eq!(times.current_time(at(13, 2, 0)), Some(Prayer::Isha));
+        assert_eq!(times.current(at(12, 8, 0)), None);
+        assert_eq!(times.current(at(12, 9, 0)), Some(Prayer::Fajr));
+        assert_eq!(times.current(at(12, 11, 0)), Some(Prayer::Sunrise));
+        assert_eq!(times.current(at(12, 19, 0)), Some(Prayer::Dhuhr));
+        assert_eq!(times.current(at(12, 22, 26)), Some(Prayer::Asr));
+        assert_eq!(times.current(at(13, 1, 0)), Some(Prayer::Maghrib));
+        assert_eq!(times.current(at(13, 2, 0)), Some(Prayer::Isha));
+        assert_eq!(times.current(at(13, 7, 0)), Some(Prayer::Qiyam));
+        assert_eq!(times.current(at(13, 9, 0)), Some(Prayer::FajrTomorrow));
+    }
+
+    #[test]
+    fn next_prayer_and_time_remaining_before_fajr_and_after_the_day() {
+        // salah 0.7's next() and time_remaining() went through current(),
+        // which panicked before Fajr (PR #23) and on any day but today,
+        // reading the clock itself (issue #17).
+        let times = raleigh_2015_07_12();
+        let at = |d, h, m| Utc.with_ymd_and_hms(2015, 7, d, h, m, 0).unwrap();
+
+        assert_eq!(times.next(at(12, 8, 0)), Some(Prayer::Fajr));
+        assert_eq!(
+            times.time_remaining(at(12, 8, 0)),
+            Some(TimeDelta::minutes(42))
+        );
+        assert_eq!(times.next(at(12, 9, 0)), Some(Prayer::Sunrise));
+        assert_eq!(times.next(at(13, 2, 0)), Some(Prayer::Qiyam));
+        assert_eq!(times.next(at(13, 7, 0)), Some(Prayer::FajrTomorrow));
+        assert_eq!(times.next(at(13, 9, 0)), None);
+        assert_eq!(times.time_remaining(at(13, 9, 0)), None);
+        assert_eq!(times.current(at(20, 0, 0)), Some(Prayer::FajrTomorrow));
+        assert_eq!(times.current(at(1, 0, 0)), None);
     }
 
     #[test]
