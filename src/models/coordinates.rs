@@ -2,6 +2,9 @@
 //
 // See LICENSE for more details.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::math::Float;
 use core::fmt;
 
 #[cfg(feature = "serde")]

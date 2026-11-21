@@ -4,8 +4,11 @@
 // Copyright (c) 2019-2022 Farhan Ahmed. All rights reserved.
 //
 
-use std::f64::consts::PI;
-use std::ops::{Add, Div, Mul, Sub};
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::math::Float;
+use core::f64::consts::PI;
+use core::ops::{Add, Div, Mul, Sub};
 
 pub trait Normalize {
     fn normalized_to_scale(&self, max: f64) -> f64;

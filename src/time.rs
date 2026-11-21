@@ -4,6 +4,9 @@
 
 //! UTC times as whole seconds, the way the calculation adds and rounds them.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::math::Float;
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 
 use crate::models::rounding::Rounding;

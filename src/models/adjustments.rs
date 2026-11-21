@@ -6,7 +6,6 @@
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use std::default::Default;
 
 /// Time adjustment for all prayer times.
 /// The value is specified in *minutes* and

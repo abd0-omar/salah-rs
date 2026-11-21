@@ -6,6 +6,9 @@
 
 use crate::astronomy::unit::Angle;
 use crate::astronomy::unit::Normalize;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::math::Float;
 use crate::models::coordinates::Coordinates;
 use crate::models::shafaq::Shafaq;
 

@@ -21,11 +21,21 @@
 //!
 //! ## Crate Features
 //!
-//! This crate exposes a feature for serialization and deserialization of the output using the `serde` crate. This
-//! functionality is optional and opt-in by adding the `serde` dependency.
+//! - `std` (default): the standard library's math. Without it the crate is
+//!   `no_std` (and needs no allocator), with `libm` for its math:
+//!   `default-features = false, features = ["libm"]`.
+//! - `serde`: serialization and deserialization, checking coordinates and
+//!   angles as they come in.
+
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
+
+#[cfg(not(any(feature = "std", feature = "libm")))]
+compile_error!("salah needs the `std` feature, or `libm` for its math without std");
 
 mod astronomy;
 mod error;
+#[cfg(not(feature = "std"))]
+mod math;
 mod models;
 mod schedule;
 mod time;
@@ -41,7 +51,7 @@ pub use crate::models::polar_circle_resolution::PolarCircleResolution;
 pub use crate::models::prayer::Prayer;
 pub use crate::schedule::{FIRST_DATE, LAST_DATE, PrayerTimes};
 pub use chrono::{
-    DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Timelike, Utc, Weekday,
+    DateTime, Datelike, Duration, NaiveDate, TimeDelta, TimeZone, Timelike, Utc, Weekday,
 };
 
 /// A convenience module appropriate for glob imports (`use salah::prelude::*;`).
@@ -71,7 +81,7 @@ pub mod prelude {
     pub use crate::schedule::{FIRST_DATE, LAST_DATE, PrayerTimes};
     #[doc(no_inline)]
     pub use chrono::{
-        DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Timelike, Utc, Weekday,
+        DateTime, Datelike, Duration, NaiveDate, TimeDelta, TimeZone, Timelike, Utc, Weekday,
     };
 }
 

@@ -9,6 +9,9 @@
 //! This module provides the main objects that are used for calculating
 //! the prayer times.
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::math::Float;
 use chrono::{DateTime, Datelike, NaiveDate, TimeDelta, TimeZone, Utc};
 
 use crate::astronomy::ops;

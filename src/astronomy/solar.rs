@@ -4,6 +4,9 @@
 // Copyright (c) 2019-2022 Farhan Ahmed. All rights reserved.
 //
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use crate::math::Float;
 use chrono::{Datelike, NaiveDate};
 
 use crate::astronomy::ops;
