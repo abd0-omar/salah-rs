@@ -117,6 +117,11 @@ fn date(from: i16, to: i16) -> impl Strategy<Value = Date> {
     (0..=days).prop_map(move |d| start + d.days())
 }
 
+fn any_date() -> impl Strategy<Value = Date> {
+    let days = (Date::MAX - Date::MIN).get_days();
+    (0..=days).prop_map(move |d| Date::MIN + d.days())
+}
+
 fn coordinates() -> impl Strategy<Value = Coordinates> {
     (-90.0..=90.0f64, -180.0..=180.0f64).prop_map(|(lat, lon)| Coordinates::new(lat, lon).unwrap())
 }
@@ -129,12 +134,11 @@ proptest! {
     fn never_panics(
         latitude in any::<f64>(),
         longitude in any::<f64>(),
-        (year, month, day) in (any::<i16>(), any::<i8>(), any::<i8>()),
+        date in any_date(),
         parameters in any_parameters(),
         now in any::<i64>(),
     ) {
         let Ok(coordinates) = Coordinates::new(latitude, longitude) else { return Ok(()) };
-        let Ok(date) = Date::new(year, month, day) else { return Ok(()) };
         if let Ok(times) = PrayerTimes::new(date, coordinates, parameters) {
             if let Ok(now) = Timestamp::from_second(now % 100_000_000_000) {
                 let _ = (times.current(now), times.next(now), times.time_remaining(now));
