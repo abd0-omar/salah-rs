@@ -4,11 +4,11 @@
 // Copyright (c) 2019-2022 Farhan Ahmed. All rights reserved.
 //
 
-use chrono::{DateTime, Datelike, Duration, TimeZone, Utc};
+use chrono::{Datelike, NaiveDate};
 
 use crate::astronomy::ops;
-use crate::astronomy::unit::Stride;
 use crate::astronomy::unit::{Angle, Coordinates};
+use crate::error::Error;
 
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub struct SolarCoordinates {
@@ -79,39 +79,36 @@ impl SolarCoordinates {
     }
 }
 
-// Solar Time
+/// The sun's transit, rising and setting on a UTC date at a place, in hours
+/// after that date's 00:00 UTC (a time of day for the place's solar day,
+/// which can be below 0 or above 24 away from the prime meridian).
 #[derive(Debug, Copy, Clone)]
 pub struct SolarTime {
-    date: DateTime<Utc>,
     observer: Coordinates,
     solar: SolarCoordinates,
-    pub transit: DateTime<Utc>,
-    pub sunrise: DateTime<Utc>,
-    pub sunset: DateTime<Utc>,
     prev_solar: SolarCoordinates,
     next_solar: SolarCoordinates,
     approx_transit: f64,
+    pub transit: f64,
+    pub sunrise: f64,
+    pub sunset: f64,
 }
 
 impl SolarTime {
-    pub fn new(date: DateTime<Utc>, coordinates: Coordinates) -> SolarTime {
-        // All calculation need to occur at 0h0m UTC
-        let today = Utc
-            .with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0)
-            .single()
-            .expect("Invalid date received.");
-        let tomorrow = today.tomorrow();
-        let yesterday = today.yesterday();
-        let prev_solar = SolarCoordinates::new(yesterday.julian_day());
-        let solar = SolarCoordinates::new(today.julian_day());
-        let next_solar = SolarCoordinates::new(tomorrow.julian_day());
-        let solar_altitude = Angle::new(-50.0 / 60.0);
+    /// The sun's day on `date` at `coordinates`, or why it has no sunrise
+    /// or sunset.
+    pub fn new(date: NaiveDate, coordinates: Coordinates) -> Result<SolarTime, Error> {
+        // All calculations are for 0h UTC of the date.
+        let julian_day = ops::julian_day(date.year(), date.month() as i32, date.day() as i32, 0.0);
+        let prev_solar = SolarCoordinates::new(julian_day - 1.0);
+        let solar = SolarCoordinates::new(julian_day);
+        let next_solar = SolarCoordinates::new(julian_day + 1.0);
         let approx_transit = ops::approximate_transit(
             coordinates.longitude_angle(),
             solar.apparent_sidereal_time,
             solar.right_ascension,
         );
-        let transit_time = ops::corrected_transit(
+        let transit = ops::corrected_transit(
             approx_transit,
             coordinates.longitude_angle(),
             solar.apparent_sidereal_time,
@@ -119,51 +116,43 @@ impl SolarTime {
             prev_solar.right_ascension,
             next_solar.right_ascension,
         );
-        let sunrise_time = ops::corrected_hour_angle(
-            approx_transit,
-            solar_altitude,
-            coordinates,
-            false,
-            solar.apparent_sidereal_time,
-            solar.right_ascension,
-            prev_solar.right_ascension,
-            next_solar.right_ascension,
-            solar.declination,
-            prev_solar.declination,
-            next_solar.declination,
-        );
-        let sunset_time = ops::corrected_hour_angle(
-            approx_transit,
-            solar_altitude,
-            coordinates,
-            true,
-            solar.apparent_sidereal_time,
-            solar.right_ascension,
-            prev_solar.right_ascension,
-            next_solar.right_ascension,
-            solar.declination,
-            prev_solar.declination,
-            next_solar.declination,
-        );
-
-        SolarTime {
-            date: date,
+        let partial = SolarTime {
             observer: coordinates,
-            solar: solar,
-            transit: SolarTime::setting_hour(transit_time, &date).unwrap(),
-            sunrise: SolarTime::setting_hour(sunrise_time, &date).unwrap(),
-            sunset: SolarTime::setting_hour(sunset_time, &date).unwrap(),
-            prev_solar: prev_solar,
-            next_solar: next_solar,
-            approx_transit: approx_transit,
+            solar,
+            prev_solar,
+            next_solar,
+            approx_transit,
+            transit,
+            sunrise: f64::NAN,
+            sunset: f64::NAN,
+        };
+        // The sun's upper limb on the horizon, with refraction: Astronomical
+        // Algorithms page 101.
+        let horizon = Angle::new(-50.0 / 60.0);
+        match (
+            partial.time_for_solar_angle(horizon, false),
+            partial.time_for_solar_angle(horizon, true),
+        ) {
+            (Some(sunrise), Some(sunset)) => Ok(SolarTime {
+                sunrise,
+                sunset,
+                ..partial
+            }),
+            // Never crossing the horizon: below it at noon, or above it all day.
+            _ if partial.noon_altitude() < horizon.degrees => Err(Error::SunNeverRises(date)),
+            _ => Err(Error::SunNeverSets(date)),
         }
     }
 
-    pub fn time_for_solar_angle(
-        &self,
-        angle: Angle,
-        after_transit: bool,
-    ) -> Result<DateTime<Utc>, String> {
+    /// The sun's altitude at transit, in degrees.
+    fn noon_altitude(&self) -> f64 {
+        90.0 - (self.observer.latitude - self.solar.declination.degrees).abs()
+    }
+
+    /// When the sun's center is at `angle` (degrees above the horizon)
+    /// before or after transit, in hours after 00:00 UTC; None if it never
+    /// is that day.
+    pub fn time_for_solar_angle(&self, angle: Angle, after_transit: bool) -> Option<f64> {
         let hours = ops::corrected_hour_angle(
             self.approx_transit,
             angle,
@@ -178,15 +167,12 @@ impl SolarTime {
             self.next_solar.declination,
         );
 
-        match SolarTime::setting_hour(hours, &self.date) {
-            Some(value) => Ok(value),
-            None => Err(String::from(
-                "Date/time value for the solar angle could not be calculated.",
-            )),
-        }
+        hours.is_finite().then_some(hours)
     }
 
-    pub fn afternoon(&self, shadow_length: f64) -> Result<DateTime<Utc>, String> {
+    /// When a stick's shadow is `shadow_length` times its height plus its
+    /// noon shadow (Asr), in hours after 00:00 UTC.
+    pub fn afternoon(&self, shadow_length: f64) -> Option<f64> {
         let absolute_degrees = (self.observer.latitude - self.solar.declination.degrees).abs();
         let tangent = Angle::new(absolute_degrees);
         let inverse = shadow_length + tangent.radians().tan();
@@ -194,29 +180,26 @@ impl SolarTime {
 
         self.time_for_solar_angle(angle, true)
     }
-
-    fn setting_hour(value: f64, date: &DateTime<Utc>) -> Option<DateTime<Utc>> {
-        if value.is_normal() {
-            // Count whole seconds from the start of the day, then round to
-            // the nearest minute. Adding a duration rolls over into the next
-            // (or previous) day, so a time that rounds up to 24:00 becomes
-            // 00:00 of the next day.
-            let calculated_seconds = (value * 60.0 * 60.0).floor() as i64;
-            let rounded_minutes = (calculated_seconds + 30).div_euclid(60);
-            let midnight = date.date_naive().and_hms_opt(0, 0, 0)?.and_utc();
-
-            midnight.checked_add_signed(Duration::minutes(rounded_minutes))
-        } else {
-            None
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::astronomy::ops;
-    use chrono::{Datelike, Local, TimeZone, Utc};
+
+    /// `hours` after 00:00 UTC as "H:MM", to the nearest minute.
+    fn clock(hours: f64) -> String {
+        let minutes = (hours * 60.0).round() as i64;
+        format!(
+            "{}:{:02}",
+            minutes.div_euclid(60).rem_euclid(24),
+            minutes.rem_euclid(60)
+        )
+    }
+
+    fn raleigh() -> Coordinates {
+        Coordinates::new(35.0 + 47.0 / 60.0, -78.0 - 39.0 / 60.0)
+    }
 
     #[test]
     fn solar_coordinates() {
@@ -229,108 +212,53 @@ mod tests {
     }
 
     #[test]
-    fn zero_out_time_for_a_date() {
-        // Local date below is 2019-01-11T04:41:19Z in UTC
-        let utc_date = Utc
-            .with_ymd_and_hms(2019, 1, 11, 23, 41, 19)
-            .single()
-            .expect("Invalid date and time provided");
-        let updated = Utc
-            .with_ymd_and_hms(utc_date.year(), utc_date.month(), utc_date.day(), 0, 0, 0)
-            .single();
-
-        assert_eq!(updated, Utc.with_ymd_and_hms(2019, 1, 11, 0, 0, 0).single());
-    }
-
-    #[test]
-    fn calculate_date_for_tomorrow() {
-        let date = Local
-            .with_ymd_and_hms(2019, 1, 10, 0, 0, 0)
-            .single()
-            .expect("Invalid date and time provided");
-        let tomorrow = date.tomorrow();
-
-        assert_eq!(tomorrow.year(), 2019);
-        assert_eq!(tomorrow.month(), 1);
-        assert_eq!(tomorrow.day(), 11);
-    }
-
-    #[test]
-    fn calculate_julian_date() {
-        // In UTC: a local midnight is the day before in UTC east of Greenwich.
-        let utc = Utc
-            .with_ymd_and_hms(1992, 10, 13, 0, 0, 0)
-            .single()
-            .expect("Invalid data and time provided");
-        let julian_day = ops::julian_day(1992, 10, 13, 0.0);
-
-        assert_eq!(utc.julian_day(), julian_day);
-    }
-
-    #[test]
     fn calculate_solar_time() {
-        let coordinates = Coordinates::new(35.0 + 47.0 / 60.0, -78.0 - 39.0 / 60.0);
-        let date = Utc
-            .with_ymd_and_hms(2015, 7, 12, 0, 0, 0)
-            .single()
-            .expect("Invalid date and time provided");
-        let solar = SolarTime::new(date, coordinates);
-        let transit_date = Utc.with_ymd_and_hms(2015, 07, 12, 17, 20, 0).unwrap();
-        let sunrise_date = Utc.with_ymd_and_hms(2015, 07, 12, 10, 08, 0).unwrap();
-        let sunset_date = Utc.with_ymd_and_hms(2015, 07, 13, 00, 32, 0).unwrap();
+        let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
+        let solar = SolarTime::new(date, raleigh()).unwrap();
 
-        assert_eq!(solar.transit, transit_date);
-        assert_eq!(solar.sunrise, sunrise_date);
-        assert_eq!(solar.sunset, sunset_date);
+        assert_eq!(clock(solar.transit), "17:20");
+        assert_eq!(clock(solar.sunrise), "10:08");
+        assert_eq!(clock(solar.sunset), "0:32");
+        assert!(solar.sunset > 24.0, "sunset is on the next UTC day");
     }
 
     #[test]
     fn calculate_time_for_solar_angle() {
-        let coordinates = Coordinates::new(35.0 + 47.0 / 60.0, -78.0 - 39.0 / 60.0);
-        let date = Utc
-            .with_ymd_and_hms(2015, 7, 12, 0, 0, 0)
-            .single()
-            .expect("Invalid date and time provided");
-        let solar = SolarTime::new(date, coordinates);
+        let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
+        let solar = SolarTime::new(date, raleigh()).unwrap();
         let angle = Angle::new(-6.0);
         let twilight_start = solar.time_for_solar_angle(angle, false).unwrap();
         let twilight_end = solar.time_for_solar_angle(angle, true).unwrap();
 
-        assert_eq!(twilight_start.format("%-k:%M").to_string(), "9:38");
-        assert_eq!(twilight_end.format("%-k:%M").to_string(), "1:02");
+        assert_eq!(clock(twilight_start), "9:38");
+        assert_eq!(clock(twilight_end), "1:02");
     }
 
     #[test]
-    fn sunset_rounding_up_to_midnight_rolls_over_to_the_next_day() {
-        // Mexico City's sunset on this day is at 23:59:3x UTC, which rounds
-        // up to 24:00 and used to panic.
-        let coordinates = Coordinates::new(19.43, -99.13);
-        let date = Utc
-            .with_ymd_and_hms(2026, 11, 8, 0, 0, 0)
-            .single()
-            .expect("Invalid date and time provided");
-        let solar = SolarTime::new(date, coordinates);
-        let sunset_date = Utc.with_ymd_and_hms(2026, 11, 9, 0, 0, 0).unwrap();
+    fn polar_day_and_night_are_errors_not_panics() {
+        // Inside the Arctic Circle: midnight sun in June, polar night in
+        // December. salah 0.7 unwrapped the missing sunrise (issue #20).
+        let arctic = Coordinates::new(69.65, 18.96);
+        let june = NaiveDate::from_ymd_opt(2026, 6, 21).unwrap();
+        let december = NaiveDate::from_ymd_opt(2026, 12, 21).unwrap();
 
-        assert_eq!(solar.sunset, sunset_date);
+        assert_eq!(
+            SolarTime::new(june, arctic).unwrap_err(),
+            Error::SunNeverSets(june)
+        );
+        assert_eq!(
+            SolarTime::new(december, arctic).unwrap_err(),
+            Error::SunNeverRises(december)
+        );
     }
 
     #[test]
     fn calculate_corrected_hour_angle() {
-        let coordinates = Coordinates::new(35.0 + 47.0 / 60.0, -78.0 - 39.0 / 60.0);
-        let date = Utc
-            .with_ymd_and_hms(2015, 7, 12, 0, 0, 0)
-            .single()
-            .expect("Invalid date and time provided");
-        let today = Utc
-            .with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0)
-            .single()
-            .expect("Invalid date and time provided.");
-        let tomorrow = today.tomorrow();
-        let yesterday = today.yesterday();
-        let prev_solar = SolarCoordinates::new(yesterday.julian_day());
-        let solar = SolarCoordinates::new(today.julian_day());
-        let next_solar = SolarCoordinates::new(tomorrow.julian_day());
+        let coordinates = raleigh();
+        let julian_day = ops::julian_day(2015, 7, 12, 0.0);
+        let prev_solar = SolarCoordinates::new(julian_day - 1.0);
+        let solar = SolarCoordinates::new(julian_day);
+        let next_solar = SolarCoordinates::new(julian_day + 1.0);
         let solar_altitude = Angle::new(-50.0 / 60.0);
         let approx_transit = ops::approximate_transit(
             coordinates.longitude_angle(),
