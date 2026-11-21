@@ -83,25 +83,31 @@ impl SolarCoordinates {
     }
 }
 
+/// The sun's upper limb on the horizon, with refraction: Astronomical
+/// Algorithms page 101.
+const HORIZON: Angle = Angle {
+    degrees: -50.0 / 60.0,
+};
+
 /// The sun's transit, rising and setting on a UTC date at a place, in hours
 /// after that date's 00:00 UTC (a time of day for the place's solar day,
 /// which can be below 0 or above 24 away from the prime meridian).
 #[derive(Debug, Copy, Clone)]
 pub struct SolarTime {
+    date: NaiveDate,
     observer: Coordinates,
     solar: SolarCoordinates,
     prev_solar: SolarCoordinates,
     next_solar: SolarCoordinates,
     approx_transit: f64,
     pub transit: f64,
-    pub sunrise: f64,
-    pub sunset: f64,
+    sunrise: Option<f64>,
+    sunset: Option<f64>,
 }
 
 impl SolarTime {
-    /// The sun's day on `date` at `coordinates`, or why it has no sunrise
-    /// or sunset.
-    pub fn new(date: NaiveDate, coordinates: Coordinates) -> Result<SolarTime, Error> {
+    /// The sun's day on `date` at `coordinates`.
+    pub fn new(date: NaiveDate, coordinates: Coordinates) -> SolarTime {
         // All calculations are for 0h UTC of the date.
         let julian_day = ops::julian_day(date.year(), date.month() as i32, date.day() as i32, 0.0);
         let prev_solar = SolarCoordinates::new(julian_day - 1.0);
@@ -121,30 +127,39 @@ impl SolarTime {
             next_solar.right_ascension,
         );
         let partial = SolarTime {
+            date,
             observer: coordinates,
             solar,
             prev_solar,
             next_solar,
             approx_transit,
             transit,
-            sunrise: f64::NAN,
-            sunset: f64::NAN,
+            sunrise: None,
+            sunset: None,
         };
-        // The sun's upper limb on the horizon, with refraction: Astronomical
-        // Algorithms page 101.
-        let horizon = Angle::new(-50.0 / 60.0);
-        match (
-            partial.time_for_solar_angle(horizon, false),
-            partial.time_for_solar_angle(horizon, true),
-        ) {
-            (Some(sunrise), Some(sunset)) => Ok(SolarTime {
-                sunrise,
-                sunset,
-                ..partial
-            }),
-            // Never crossing the horizon: below it at noon, or above it all day.
-            _ if partial.noon_altitude() < horizon.degrees => Err(Error::SunNeverRises(date)),
-            _ => Err(Error::SunNeverSets(date)),
+        SolarTime {
+            sunrise: partial.time_for_solar_angle(HORIZON, false),
+            sunset: partial.time_for_solar_angle(HORIZON, true),
+            ..partial
+        }
+    }
+
+    /// Sunrise, or why there is none.
+    pub fn sunrise(&self) -> Result<f64, Error> {
+        self.sunrise.ok_or_else(|| self.no_crossing())
+    }
+
+    /// Sunset, or why there is none.
+    pub fn sunset(&self) -> Result<f64, Error> {
+        self.sunset.ok_or_else(|| self.no_crossing())
+    }
+
+    /// Why the sun doesn't cross the horizon: below it at noon, or above
+    /// it all day.
+    fn no_crossing(&self) -> Error {
+        match self.noon_altitude() < HORIZON.degrees {
+            true => Error::SunNeverRises(self.date),
+            false => Error::SunNeverSets(self.date),
         }
     }
 
@@ -243,18 +258,21 @@ mod tests {
     #[test]
     fn calculate_solar_time() {
         let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
-        let solar = SolarTime::new(date, raleigh()).unwrap();
+        let solar = SolarTime::new(date, raleigh());
 
         assert_eq!(clock(solar.transit), "17:20");
-        assert_eq!(clock(solar.sunrise), "10:08");
-        assert_eq!(clock(solar.sunset), "0:32");
-        assert!(solar.sunset > 24.0, "sunset is on the next UTC day");
+        assert_eq!(clock(solar.sunrise().unwrap()), "10:08");
+        assert_eq!(clock(solar.sunset().unwrap()), "0:32");
+        assert!(
+            solar.sunset().unwrap() > 24.0,
+            "sunset is on the next UTC day"
+        );
     }
 
     #[test]
     fn calculate_time_for_solar_angle() {
         let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
-        let solar = SolarTime::new(date, raleigh()).unwrap();
+        let solar = SolarTime::new(date, raleigh());
         let angle = Angle::new(-6.0);
         let twilight_start = solar.time_for_solar_angle(angle, false).unwrap();
         let twilight_end = solar.time_for_solar_angle(angle, true).unwrap();
@@ -272,12 +290,16 @@ mod tests {
         let december = NaiveDate::from_ymd_opt(2026, 12, 21).unwrap();
 
         assert_eq!(
-            SolarTime::new(june, arctic).unwrap_err(),
-            Error::SunNeverSets(june)
+            SolarTime::new(june, arctic).sunset(),
+            Err(Error::SunNeverSets(june))
         );
         assert_eq!(
-            SolarTime::new(december, arctic).unwrap_err(),
-            Error::SunNeverRises(december)
+            SolarTime::new(june, arctic).sunrise(),
+            Err(Error::SunNeverSets(june))
+        );
+        assert_eq!(
+            SolarTime::new(december, arctic).sunrise(),
+            Err(Error::SunNeverRises(december))
         );
     }
 

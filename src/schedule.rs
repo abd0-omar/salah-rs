@@ -62,9 +62,10 @@ struct SolarDay {
 
 impl SolarDay {
     fn new(date: NaiveDate, coordinates: Coordinates) -> Result<SolarDay, Error> {
-        let solar = SolarTime::new(date, coordinates)?;
+        let solar = SolarTime::new(date, coordinates);
+        let (sunrise, sunset) = (solar.sunrise()?, solar.sunset()?);
         let at = |hours| Moment::at_hours(date, hours);
-        match (at(solar.transit), at(solar.sunrise), at(solar.sunset)) {
+        match (at(solar.transit), at(sunrise), at(sunset)) {
             (Some(transit), Some(sunrise), Some(sunset)) => Ok(SolarDay {
                 date,
                 solar,
@@ -113,13 +114,17 @@ impl Events {
         parameters: &Parameters,
     ) -> Result<Events, Error> {
         let today = SolarDay::new(date, coordinates)?;
-        let tomorrow = SolarDay::new(next_day(date)?, coordinates)?;
+        // Of the next day only its sunrise, which ends the night: it may
+        // have no sunset (the midnight sun beginning).
+        let next = next_day(date)?;
+        let tomorrow_sunrise = Moment::at_hours(next, SolarTime::new(next, coordinates).sunrise()?)
+            .ok_or(Error::DateOutOfRange(next))?;
         let after_sunset = |angle: DepressionAngle| today.below_horizon(angle.degrees(), true);
         Ok(Events {
             sunrise: today.sunrise,
             transit: today.transit,
             sunset: today.sunset,
-            tomorrow_sunrise: tomorrow.sunrise,
+            tomorrow_sunrise,
             fajr: today.below_horizon(parameters.fajr_angle.degrees(), false),
             isha: match parameters.isha {
                 Isha::Angle(angle) => after_sunset(angle),
@@ -858,6 +863,29 @@ mod tests {
         assert_eq!(
             PrayerTimes::on_local_date(day, &riyadh, mecca, params),
             PrayerTimes::new(day, mecca, params)
+        );
+    }
+
+    #[test]
+    fn the_night_ends_at_the_next_sunrise_even_without_a_next_sunset() {
+        // A day's times take the next day's sunrise, not its sunset: the
+        // day before the midnight sun begins has times. Asking for both
+        // sent AqrabBalad a step too far south for the next day, and the
+        // night came out two minutes short. Adhan's times.
+        let mut params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
+        params.polar_circle_resolution = PolarCircleResolution::AqrabBalad;
+        let tromso = Coordinates::new(69.6492, 18.9553).unwrap();
+        let times = PrayerTimes::new(date(2026, 6, 2), tromso, params).unwrap();
+        assert_eq!(
+            times
+                .time(Prayer::FajrTomorrow)
+                .format("%-k:%M")
+                .to_string(),
+            "22:52"
+        );
+        assert_eq!(
+            times.middle_of_the_night().format("%-k:%M").to_string(),
+            "22:30"
         );
     }
 
