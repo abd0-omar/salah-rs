@@ -154,6 +154,14 @@ impl Day {
             }
         };
 
+        // Tehran's method: Maghrib when the sun is that far below the
+        // horizon, if that is between sunset and Isha.
+        let maghrib = parameters
+            .maghrib_angle
+            .and_then(|angle| today.below_horizon(angle.degrees(), true))
+            .filter(|&maghrib| today.sunset < maghrib && maghrib < isha)
+            .unwrap_or(today.sunset);
+
         Ok(Day {
             fajr,
             sunrise: today.sunrise,
@@ -161,7 +169,7 @@ impl Day {
             asr: today
                 .afternoon(parameters.madhab.shadow().into())
                 .unwrap_or(today.transit),
-            maghrib: today.sunset,
+            maghrib,
             isha,
         })
     }
@@ -465,6 +473,24 @@ mod tests {
         ]
         .map(|p| chrono::Timelike::second(&times.time(p)));
         assert_ne!(seconds, [0; 5]);
+    }
+
+    #[test]
+    fn tehrans_maghrib_is_at_its_angle() {
+        // salah 0.7 kept Tehran's 4.5° Maghrib angle but never used it:
+        // Maghrib was at sunset (14:47 UTC). Adhan's times.
+        let params = Configuration::with(Method::Tehran, Madhab::Shafi);
+        let tehran = Coordinates::new(35.6892, 51.3890).unwrap();
+        let times = PrayerTimes::new(date(2026, 3, 21), tehran, params).unwrap();
+
+        assert_eq!(
+            times.time(Prayer::Maghrib).format("%-k:%M").to_string(),
+            "15:05"
+        );
+        assert_eq!(
+            times.time(Prayer::Isha).format("%-k:%M").to_string(),
+            "15:52"
+        );
     }
 
     #[test]
