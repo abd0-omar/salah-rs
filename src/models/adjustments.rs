@@ -10,20 +10,21 @@ use std::default::Default;
 
 /// Time adjustment for all prayer times.
 /// The value is specified in *minutes* and
-/// can be either positive or negative.
+/// can be either positive or negative (up to about 22 days either way, so
+/// adding one can't overflow).
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub struct TimeAdjustment {
-    pub fajr: i64,
-    pub sunrise: i64,
-    pub dhuhr: i64,
-    pub asr: i64,
-    pub maghrib: i64,
-    pub isha: i64,
+    pub fajr: i16,
+    pub sunrise: i16,
+    pub dhuhr: i16,
+    pub asr: i16,
+    pub maghrib: i16,
+    pub isha: i16,
 }
 
 impl TimeAdjustment {
-    pub fn new(fajr: i64, sunrise: i64, dhuhr: i64, asr: i64, maghrib: i64, isha: i64) -> Self {
+    pub fn new(fajr: i16, sunrise: i16, dhuhr: i16, asr: i16, maghrib: i16, isha: i16) -> Self {
         TimeAdjustment {
             fajr: fajr,
             sunrise: sunrise,
@@ -51,12 +52,12 @@ impl Default for TimeAdjustment {
 /// Builder struct for the [TimeAdjustment](struct.TimeAdjustment.html).
 /// It is recommended to use this for all needed adjustments.
 pub struct Adjustment {
-    fajr: i64,
-    sunrise: i64,
-    dhuhr: i64,
-    asr: i64,
-    maghrib: i64,
-    isha: i64,
+    fajr: i16,
+    sunrise: i16,
+    dhuhr: i16,
+    asr: i16,
+    maghrib: i16,
+    isha: i16,
 }
 
 impl Adjustment {
@@ -71,32 +72,32 @@ impl Adjustment {
         }
     }
 
-    pub fn fajr<'a>(&'a mut self, fajr: i64) -> &'a mut Adjustment {
+    pub fn fajr<'a>(&'a mut self, fajr: i16) -> &'a mut Adjustment {
         self.fajr = fajr;
         self
     }
 
-    pub fn sunrise<'a>(&'a mut self, sunrise: i64) -> &'a mut Adjustment {
+    pub fn sunrise<'a>(&'a mut self, sunrise: i16) -> &'a mut Adjustment {
         self.sunrise = sunrise;
         self
     }
 
-    pub fn dhuhr<'a>(&'a mut self, dhuhr: i64) -> &'a mut Adjustment {
+    pub fn dhuhr<'a>(&'a mut self, dhuhr: i16) -> &'a mut Adjustment {
         self.dhuhr = dhuhr;
         self
     }
 
-    pub fn asr<'a>(&'a mut self, asr: i64) -> &'a mut Adjustment {
+    pub fn asr<'a>(&'a mut self, asr: i16) -> &'a mut Adjustment {
         self.asr = asr;
         self
     }
 
-    pub fn maghrib<'a>(&'a mut self, maghrib: i64) -> &'a mut Adjustment {
+    pub fn maghrib<'a>(&'a mut self, maghrib: i16) -> &'a mut Adjustment {
         self.maghrib = maghrib;
         self
     }
 
-    pub fn isha<'a>(&'a mut self, isha: i64) -> &'a mut Adjustment {
+    pub fn isha<'a>(&'a mut self, isha: i16) -> &'a mut Adjustment {
         self.isha = isha;
         self
     }

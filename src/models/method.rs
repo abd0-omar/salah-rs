@@ -4,8 +4,8 @@
 // Copyright (c) 2019-2022 Farhan Ahmed. All rights reserved.
 //
 
-use super::adjustments::Adjustment;
-use super::parameters::{Configuration, Parameters};
+use super::adjustments::TimeAdjustment;
+use super::parameters::{Configuration, DepressionAngle, Isha, Parameters};
 use super::rounding::Rounding;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -73,82 +73,78 @@ pub enum Method {
     Other,
 }
 
+/// A method's angles, offsets and rounding.
+struct Preset {
+    fajr: f64,
+    isha: Isha,
+    maghrib: Option<f64>,
+    adjustments: TimeAdjustment,
+    rounding: Rounding,
+}
+
+const fn angle(degrees: f64) -> Isha {
+    Isha::Angle(DepressionAngle::constant(degrees))
+}
+
+/// Minutes added to sunrise, Dhuhr, Asr and Maghrib.
+const fn offsets(sunrise: i16, dhuhr: i16, asr: i16, maghrib: i16) -> TimeAdjustment {
+    TimeAdjustment {
+        fajr: 0,
+        sunrise,
+        dhuhr,
+        asr,
+        maghrib,
+        isha: 0,
+    }
+}
+
+const fn preset(fajr: f64, isha: Isha, adjustments: TimeAdjustment) -> Preset {
+    Preset {
+        fajr,
+        isha,
+        maghrib: None,
+        adjustments,
+        rounding: Rounding::Nearest,
+    }
+}
+
 impl Method {
-    pub fn parameters(&self) -> Parameters {
+    const fn preset(self) -> Preset {
         match self {
-            Method::MuslimWorldLeague => Configuration::new(18.0, 17.0)
-                .method(*self)
-                .method_adjustments(Adjustment::new().dhuhr(1).done())
-                .done(),
-
-            Method::Egyptian => Configuration::new(19.5, 17.5)
-                .method(*self)
-                .method_adjustments(Adjustment::new().dhuhr(1).done())
-                .done(),
-
-            Method::Karachi => Configuration::new(18.0, 18.0)
-                .method(*self)
-                .method_adjustments(Adjustment::new().dhuhr(1).done())
-                .done(),
-
-            Method::UmmAlQura => Configuration::new(18.5, 0.0)
-                .method(*self)
-                .isha_interval(90)
-                .done(),
-            Method::Dubai => Configuration::new(18.2, 18.2)
-                .method(*self)
-                .method_adjustments(
-                    Adjustment::new()
-                        .sunrise(-3)
-                        .dhuhr(3)
-                        .asr(3)
-                        .maghrib(3)
-                        .done(),
-                )
-                .done(),
-
-            Method::MoonsightingCommittee => Configuration::new(18.0, 18.0)
-                .method(*self)
-                .method_adjustments(Adjustment::new().dhuhr(5).maghrib(3).done())
-                .done(),
-
-            Method::NorthAmerica => Configuration::new(15.0, 15.0)
-                .method(*self)
-                .method_adjustments(Adjustment::new().dhuhr(1).done())
-                .done(),
-
-            Method::Kuwait => Configuration::new(18.0, 17.5).method(*self).done(),
-
-            Method::Qatar => Configuration::new(18.0, 0.0)
-                .method(*self)
-                .isha_interval(90)
-                .done(),
-
-            Method::Singapore => Configuration::new(20.0, 18.0)
-                .method(*self)
-                .method_adjustments(Adjustment::new().dhuhr(1).done())
-                .rounding(Rounding::Up)
-                .done(),
-
-            Method::Tehran => Configuration::new(17.7, 14.0)
-                .method(*self)
-                .maghrib_angle(4.5)
-                .done(),
-
-            Method::Turkey => Configuration::new(18.0, 17.0)
-                .method(*self)
-                .method_adjustments(
-                    Adjustment::new()
-                        .sunrise(-7)
-                        .dhuhr(5)
-                        .asr(4)
-                        .maghrib(7)
-                        .done(),
-                )
-                .done(),
-
-            Method::Other => Configuration::new(0.0, 0.0).method(*self).done(),
+            Method::MuslimWorldLeague => preset(18.0, angle(17.0), offsets(0, 1, 0, 0)),
+            Method::Egyptian => preset(19.5, angle(17.5), offsets(0, 1, 0, 0)),
+            Method::Karachi => preset(18.0, angle(18.0), offsets(0, 1, 0, 0)),
+            Method::UmmAlQura => preset(18.5, Isha::Interval(90), offsets(0, 0, 0, 0)),
+            Method::Dubai => preset(18.2, angle(18.2), offsets(-3, 3, 3, 3)),
+            Method::MoonsightingCommittee => preset(18.0, angle(18.0), offsets(0, 5, 0, 3)),
+            Method::NorthAmerica => preset(15.0, angle(15.0), offsets(0, 1, 0, 0)),
+            Method::Kuwait => preset(18.0, angle(17.5), offsets(0, 0, 0, 0)),
+            Method::Qatar => preset(18.0, Isha::Interval(90), offsets(0, 0, 0, 0)),
+            Method::Singapore => Preset {
+                rounding: Rounding::Up,
+                ..preset(20.0, angle(18.0), offsets(0, 1, 0, 0))
+            },
+            Method::Tehran => Preset {
+                maghrib: Some(4.5),
+                ..preset(17.7, angle(14.0), offsets(0, 0, 0, 0))
+            },
+            Method::Turkey => preset(18.0, angle(17.0), offsets(-7, 5, 4, 7)),
+            Method::Other => preset(0.0, angle(0.0), offsets(0, 0, 0, 0)),
         }
+    }
+
+    pub fn parameters(&self) -> Parameters {
+        let preset = self.preset();
+        let mut configuration =
+            Configuration::new(DepressionAngle::constant(preset.fajr), preset.isha);
+        configuration
+            .method(*self)
+            .method_adjustments(preset.adjustments)
+            .rounding(preset.rounding);
+        if let Some(maghrib) = preset.maghrib {
+            configuration.maghrib_angle(DepressionAngle::constant(maghrib));
+        }
+        configuration.done()
     }
 }
 
@@ -162,9 +158,11 @@ mod tests {
         let params = method.parameters();
 
         assert_eq!(params.method, Method::MuslimWorldLeague);
-        assert_eq!(params.fajr_angle, 18.0);
-        assert_eq!(params.isha_angle, 17.0);
-        assert_eq!(params.isha_interval, 0);
+        assert_eq!(params.fajr_angle.degrees(), 18.0);
+        assert_eq!(
+            params.isha,
+            Isha::Angle(DepressionAngle::new(17.0).unwrap())
+        );
     }
 
     #[test]
@@ -173,9 +171,11 @@ mod tests {
         let params = method.parameters();
 
         assert_eq!(params.method, Method::Egyptian);
-        assert_eq!(params.fajr_angle, 19.5);
-        assert_eq!(params.isha_angle, 17.5);
-        assert_eq!(params.isha_interval, 0);
+        assert_eq!(params.fajr_angle.degrees(), 19.5);
+        assert_eq!(
+            params.isha,
+            Isha::Angle(DepressionAngle::new(17.5).unwrap())
+        );
     }
 
     #[test]
@@ -184,9 +184,11 @@ mod tests {
         let params = method.parameters();
 
         assert_eq!(params.method, Method::Karachi);
-        assert_eq!(params.fajr_angle, 18.0);
-        assert_eq!(params.isha_angle, 18.0);
-        assert_eq!(params.isha_interval, 0);
+        assert_eq!(params.fajr_angle.degrees(), 18.0);
+        assert_eq!(
+            params.isha,
+            Isha::Angle(DepressionAngle::new(18.0).unwrap())
+        );
     }
 
     #[test]
@@ -195,9 +197,8 @@ mod tests {
         let params = method.parameters();
 
         assert_eq!(params.method, Method::UmmAlQura);
-        assert_eq!(params.fajr_angle, 18.5);
-        assert_eq!(params.isha_angle, 0.0);
-        assert_eq!(params.isha_interval, 90);
+        assert_eq!(params.fajr_angle.degrees(), 18.5);
+        assert_eq!(params.isha, Isha::Interval(90));
     }
 
     #[test]
@@ -206,9 +207,16 @@ mod tests {
         let params = method.parameters();
 
         assert_eq!(params.method, Method::Dubai);
-        assert_eq!(params.fajr_angle, 18.2, "Parameters: {:?}", params);
-        assert_eq!(params.isha_angle, 18.2);
-        assert_eq!(params.isha_interval, 0);
+        assert_eq!(
+            params.fajr_angle.degrees(),
+            18.2,
+            "Parameters: {:?}",
+            params
+        );
+        assert_eq!(
+            params.isha,
+            Isha::Angle(DepressionAngle::new(18.2).unwrap())
+        );
     }
 
     #[test]
@@ -217,9 +225,11 @@ mod tests {
         let params = method.parameters();
 
         assert_eq!(params.method, Method::MoonsightingCommittee);
-        assert_eq!(params.fajr_angle, 18.0);
-        assert_eq!(params.isha_angle, 18.0);
-        assert_eq!(params.isha_interval, 0);
+        assert_eq!(params.fajr_angle.degrees(), 18.0);
+        assert_eq!(
+            params.isha,
+            Isha::Angle(DepressionAngle::new(18.0).unwrap())
+        );
     }
 
     #[test]
@@ -228,9 +238,11 @@ mod tests {
         let params = method.parameters();
 
         assert_eq!(params.method, Method::NorthAmerica);
-        assert_eq!(params.fajr_angle, 15.0);
-        assert_eq!(params.isha_angle, 15.0);
-        assert_eq!(params.isha_interval, 0);
+        assert_eq!(params.fajr_angle.degrees(), 15.0);
+        assert_eq!(
+            params.isha,
+            Isha::Angle(DepressionAngle::new(15.0).unwrap())
+        );
     }
 
     #[test]
@@ -239,9 +251,11 @@ mod tests {
         let params = method.parameters();
 
         assert_eq!(params.method, Method::Kuwait);
-        assert_eq!(params.fajr_angle, 18.0);
-        assert_eq!(params.isha_angle, 17.5);
-        assert_eq!(params.isha_interval, 0);
+        assert_eq!(params.fajr_angle.degrees(), 18.0);
+        assert_eq!(
+            params.isha,
+            Isha::Angle(DepressionAngle::new(17.5).unwrap())
+        );
     }
 
     #[test]
@@ -250,9 +264,8 @@ mod tests {
         let params = method.parameters();
 
         assert_eq!(params.method, Method::Qatar);
-        assert_eq!(params.fajr_angle, 18.0);
-        assert_eq!(params.isha_angle, 0.0);
-        assert_eq!(params.isha_interval, 90);
+        assert_eq!(params.fajr_angle.degrees(), 18.0);
+        assert_eq!(params.isha, Isha::Interval(90));
     }
 
     #[test]
@@ -261,9 +274,27 @@ mod tests {
         let params = method.parameters();
 
         assert_eq!(params.method, Method::Singapore);
-        assert_eq!(params.fajr_angle, 20.0);
-        assert_eq!(params.isha_angle, 18.0);
-        assert_eq!(params.isha_interval, 0);
+        assert_eq!(params.fajr_angle.degrees(), 20.0);
+        assert_eq!(
+            params.isha,
+            Isha::Angle(DepressionAngle::new(18.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn parameters_for_tehran() {
+        let params = Method::Tehran.parameters();
+
+        assert_eq!(params.maghrib_angle, DepressionAngle::new(4.5).ok());
+        assert_eq!(
+            params.isha,
+            Isha::Angle(DepressionAngle::new(14.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn parameters_for_singapore_round_up() {
+        assert_eq!(Method::Singapore.parameters().rounding, Rounding::Up);
     }
 
     #[test]
@@ -272,8 +303,7 @@ mod tests {
         let params = method.parameters();
 
         assert_eq!(params.method, Method::Other);
-        assert_eq!(params.fajr_angle, 0.0);
-        assert_eq!(params.isha_angle, 0.0);
-        assert_eq!(params.isha_interval, 0);
+        assert_eq!(params.fajr_angle.degrees(), 0.0);
+        assert_eq!(params.isha, Isha::Angle(DepressionAngle::new(0.0).unwrap()));
     }
 }

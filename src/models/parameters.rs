@@ -3,6 +3,8 @@
 // See LICENSE for more details.
 // Copyright (c) 2019-2022 Farhan Ahmed. All rights reserved.
 //
+use core::fmt;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +16,80 @@ use super::prayer::Prayer;
 use super::rounding::Rounding;
 use super::shafaq::Shafaq;
 
+/// Degrees of the sun's center below the horizon, for a twilight: a finite
+/// number in [0, 30]. Every method's angles are in 4.5 to 20; past 30 the
+/// twilight angle rule's share of the night (angle / 60) would pass its
+/// middle.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
+#[derive(PartialEq, PartialOrd, Debug, Copy, Clone)]
+pub struct DepressionAngle(f64);
+
+/// A number that isn't a [`DepressionAngle`].
+#[derive(PartialEq, Debug, Copy, Clone)]
+pub struct AngleError(pub f64);
+
+impl DepressionAngle {
+    /// The largest angle taken.
+    pub const MAX: f64 = 30.0;
+
+    /// `degrees` below the horizon, if finite and in [0, 30].
+    pub fn new(degrees: f64) -> Result<Self, AngleError> {
+        if (0.0..=Self::MAX).contains(&degrees) {
+            Ok(DepressionAngle(degrees))
+        } else {
+            Err(AngleError(degrees))
+        }
+    }
+
+    /// A method's angle, checked when the constant is built.
+    pub(crate) const fn constant(degrees: f64) -> Self {
+        assert!(degrees >= 0.0 && degrees <= Self::MAX);
+        DepressionAngle(degrees)
+    }
+
+    pub fn degrees(self) -> f64 {
+        self.0
+    }
+}
+
+impl TryFrom<f64> for DepressionAngle {
+    type Error = AngleError;
+
+    fn try_from(degrees: f64) -> Result<Self, AngleError> {
+        DepressionAngle::new(degrees)
+    }
+}
+
+impl From<DepressionAngle> for f64 {
+    fn from(angle: DepressionAngle) -> f64 {
+        angle.0
+    }
+}
+
+impl fmt::Display for AngleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} is not a number of degrees below the horizon in [0, {}]",
+            self.0,
+            DepressionAngle::MAX
+        )
+    }
+}
+
+impl core::error::Error for AngleError {}
+
+/// When Isha begins.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(PartialEq, Debug, Copy, Clone)]
+pub enum Isha {
+    /// When the sun is this far below the horizon after sunset.
+    Angle(DepressionAngle),
+    /// This many minutes after sunset.
+    Interval(u8),
+}
+
 /// Settings that are used for determining the
 /// the correct prayer time.
 ///
@@ -23,10 +99,11 @@ use super::shafaq::Shafaq;
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub struct Parameters {
     pub method: Method,
-    pub fajr_angle: f64,
-    pub maghrib_angle: f64,
-    pub isha_angle: f64,
-    pub isha_interval: i32,
+    pub fajr_angle: DepressionAngle,
+    /// Maghrib when the sun is this far below the horizon, rather than at
+    /// sunset (Tehran's method).
+    pub maghrib_angle: Option<DepressionAngle>,
+    pub isha: Isha,
     pub madhab: Madhab,
     pub high_latitude_rule: HighLatitudeRule,
     pub adjustments: TimeAdjustment,
@@ -36,40 +113,33 @@ pub struct Parameters {
 }
 
 impl Parameters {
-    pub fn new(fajr_angle: f64, isha_angle: f64) -> Parameters {
-        Parameters {
-            fajr_angle: fajr_angle,
-            maghrib_angle: 0.0,
-            isha_angle: isha_angle,
-            method: Method::Other,
-            isha_interval: 0,
-            madhab: Madhab::Shafi,
-            high_latitude_rule: HighLatitudeRule::MiddleOfTheNight,
-            adjustments: TimeAdjustment::default(),
-            method_adjustments: TimeAdjustment::default(),
-            rounding: Rounding::Nearest,
-            shafaq: Shafaq::General,
-        }
+    pub fn new(fajr_angle: DepressionAngle, isha: Isha) -> Parameters {
+        Configuration::new(fajr_angle, isha).done()
     }
 
-    pub fn night_portions(&self) -> (f64, f64) {
+    /// The share of the night a twilight at `angle` is held to under the
+    /// high-latitude rule: Fajr no earlier than this share of the night
+    /// before sunrise, Isha no later than this share after sunset.
+    pub fn night_portion(&self, angle: DepressionAngle) -> f64 {
         match self.high_latitude_rule {
-            HighLatitudeRule::MiddleOfTheNight => (1.0 / 2.0, 1.0 / 2.0),
-            HighLatitudeRule::SeventhOfTheNight => (1.0 / 7.0, 1.0 / 7.0),
-            HighLatitudeRule::TwilightAngle => (self.fajr_angle / 60.0, self.isha_angle / 60.0),
+            HighLatitudeRule::MiddleOfTheNight => 1.0 / 2.0,
+            HighLatitudeRule::SeventhOfTheNight => 1.0 / 7.0,
+            HighLatitudeRule::TwilightAngle => angle.degrees() / 60.0,
         }
     }
 
-    pub fn time_adjustments(&self, prayer: Prayer) -> i64 {
-        match prayer {
-            Prayer::Fajr => self.adjustments.fajr + self.method_adjustments.fajr,
-            Prayer::Sunrise => self.adjustments.sunrise + self.method_adjustments.sunrise,
-            Prayer::Dhuhr => self.adjustments.dhuhr + self.method_adjustments.dhuhr,
-            Prayer::Asr => self.adjustments.asr + self.method_adjustments.asr,
-            Prayer::Maghrib => self.adjustments.maghrib + self.method_adjustments.maghrib,
-            Prayer::Isha => self.adjustments.isha + self.method_adjustments.isha,
-            _ => 0,
-        }
+    /// The minutes added to `prayer`'s time: the user's and the method's.
+    pub fn time_adjustments(&self, prayer: Prayer) -> i32 {
+        let pick = |a: &TimeAdjustment| match prayer {
+            Prayer::Fajr | Prayer::FajrTomorrow => a.fajr,
+            Prayer::Sunrise => a.sunrise,
+            Prayer::Dhuhr => a.dhuhr,
+            Prayer::Asr => a.asr,
+            Prayer::Maghrib => a.maghrib,
+            Prayer::Isha => a.isha,
+            Prayer::Qiyam => 0,
+        };
+        i32::from(pick(&self.adjustments)) + i32::from(pick(&self.method_adjustments))
     }
 }
 
@@ -78,104 +148,85 @@ impl Parameters {
 /// It is recommended that this is used for setting
 /// all parameters that are needed.
 pub struct Configuration {
-    method: Method,
-    fajr_angle: f64,
-    maghrib_angle: f64,
-    isha_angle: f64,
-    isha_interval: i32,
-    madhab: Madhab,
-    high_latitude_rule: HighLatitudeRule,
-    adjustments: TimeAdjustment,
-    method_adjustments: TimeAdjustment,
-    rounding: Rounding,
-    shafaq: Shafaq,
+    parameters: Parameters,
 }
 
 impl Configuration {
-    pub fn new(fajr_angle: f64, isha_angle: f64) -> Configuration {
+    pub fn new(fajr_angle: DepressionAngle, isha: Isha) -> Configuration {
         Configuration {
-            fajr_angle: fajr_angle,
-            maghrib_angle: 0.0,
-            isha_angle: isha_angle,
-            method: Method::Other,
-            isha_interval: 0,
-            madhab: Madhab::Shafi,
-            high_latitude_rule: HighLatitudeRule::MiddleOfTheNight,
-            adjustments: TimeAdjustment::default(),
-            method_adjustments: TimeAdjustment::default(),
-            rounding: Rounding::Nearest,
-            shafaq: Shafaq::General,
+            parameters: Parameters {
+                method: Method::Other,
+                fajr_angle,
+                maghrib_angle: None,
+                isha,
+                madhab: Madhab::Shafi,
+                high_latitude_rule: HighLatitudeRule::MiddleOfTheNight,
+                adjustments: TimeAdjustment::default(),
+                method_adjustments: TimeAdjustment::default(),
+                rounding: Rounding::Nearest,
+                shafaq: Shafaq::General,
+            },
         }
     }
 
     pub fn with(method: Method, madhab: Madhab) -> Parameters {
-        let mut params = method.parameters();
-        params.madhab = madhab;
-
-        params
+        Parameters {
+            madhab,
+            ..method.parameters()
+        }
     }
 
-    pub fn method<'a>(&'a mut self, method: Method) -> &'a mut Configuration {
-        self.method = method;
+    pub fn method(&mut self, method: Method) -> &mut Configuration {
+        self.parameters.method = method;
         self
     }
 
-    pub fn method_adjustments<'a>(
-        &'a mut self,
-        method_adjustments: TimeAdjustment,
-    ) -> &'a mut Configuration {
-        self.method_adjustments = method_adjustments;
+    pub fn adjustments(&mut self, adjustments: TimeAdjustment) -> &mut Configuration {
+        self.parameters.adjustments = adjustments;
         self
     }
 
-    pub fn high_latitude_rule<'a>(
-        &'a mut self,
+    pub fn method_adjustments(&mut self, method_adjustments: TimeAdjustment) -> &mut Configuration {
+        self.parameters.method_adjustments = method_adjustments;
+        self
+    }
+
+    pub fn high_latitude_rule(
+        &mut self,
         high_latitude_rule: HighLatitudeRule,
-    ) -> &'a mut Configuration {
-        self.high_latitude_rule = high_latitude_rule;
+    ) -> &mut Configuration {
+        self.parameters.high_latitude_rule = high_latitude_rule;
         self
     }
 
-    pub fn madhab<'a>(&'a mut self, madhab: Madhab) -> &'a mut Configuration {
-        self.madhab = madhab;
+    pub fn madhab(&mut self, madhab: Madhab) -> &mut Configuration {
+        self.parameters.madhab = madhab;
         self
     }
 
-    pub fn isha_interval<'a>(&'a mut self, isha_interval: i32) -> &'a mut Configuration {
-        self.isha_angle = 0.0;
-        self.isha_interval = isha_interval;
+    /// Isha this many minutes after sunset, rather than at an angle.
+    pub fn isha_interval(&mut self, minutes: u8) -> &mut Configuration {
+        self.parameters.isha = Isha::Interval(minutes);
         self
     }
 
-    pub fn maghrib_angle<'a>(&'a mut self, angle: f64) -> &'a mut Configuration {
-        self.maghrib_angle = angle;
+    pub fn maghrib_angle(&mut self, angle: DepressionAngle) -> &mut Configuration {
+        self.parameters.maghrib_angle = Some(angle);
         self
     }
 
-    pub fn rounding<'a>(&'a mut self, value: Rounding) -> &'a mut Configuration {
-        self.rounding = value;
+    pub fn rounding(&mut self, value: Rounding) -> &mut Configuration {
+        self.parameters.rounding = value;
         self
     }
 
-    pub fn shafaq<'a>(&'a mut self, value: Shafaq) -> &'a mut Configuration {
-        self.shafaq = value;
+    pub fn shafaq(&mut self, value: Shafaq) -> &mut Configuration {
+        self.parameters.shafaq = value;
         self
     }
 
     pub fn done(&self) -> Parameters {
-        Parameters {
-            fajr_angle: self.fajr_angle,
-            maghrib_angle: self.maghrib_angle,
-            isha_angle: self.isha_angle,
-            method: self.method,
-            isha_interval: self.isha_interval,
-            madhab: self.madhab,
-            high_latitude_rule: self.high_latitude_rule,
-            adjustments: self.adjustments,
-            method_adjustments: self.method_adjustments,
-            rounding: self.rounding,
-            shafaq: self.shafaq,
-        }
+        self.parameters
     }
 }
 
@@ -183,41 +234,56 @@ impl Configuration {
 mod tests {
     use super::*;
 
+    fn angle(degrees: f64) -> DepressionAngle {
+        DepressionAngle::new(degrees).unwrap()
+    }
+
+    #[test]
+    fn angles_are_finite_degrees_from_0_to_30() {
+        // salah 0.7 took any f64: NaN fell back to the safe time silently,
+        // and a huge angle under the twilight angle rule overflowed.
+        for bad in [f64::NAN, f64::INFINITY, -f64::INFINITY, -0.5, 30.5, 1e300] {
+            assert_eq!(
+                DepressionAngle::new(bad).map_err(|e| e.0.to_bits()),
+                Err(bad.to_bits())
+            );
+        }
+        assert_eq!(angle(0.0).degrees(), 0.0);
+        assert_eq!(angle(30.0).degrees(), 30.0);
+    }
+
     #[test]
     fn calculate_parameters_with_fajr_and_isha_angles() {
-        let params = Parameters::new(18.0, 18.0);
+        let params = Parameters::new(angle(18.0), Isha::Angle(angle(18.0)));
 
-        assert_eq!(params.fajr_angle, 18.0);
-        assert_eq!(params.isha_angle, 18.0);
-        assert_eq!(params.isha_interval, 0);
+        assert_eq!(params.fajr_angle, angle(18.0));
+        assert_eq!(params.isha, Isha::Angle(angle(18.0)));
     }
 
     #[test]
     fn calculated_night_portions_middle_of_the_night() {
-        let params = Parameters::new(18.0, 18.0);
+        let params = Parameters::new(angle(18.0), Isha::Angle(angle(18.0)));
 
-        assert_eq!(params.night_portions().0, 1.0 / 2.0);
-        assert_eq!(params.night_portions().1, 1.0 / 2.0);
+        assert_eq!(params.night_portion(angle(18.0)), 1.0 / 2.0);
     }
 
     #[test]
     fn calculated_night_portions_seventh_of_the_night() {
-        let params = Configuration::new(18.0, 18.0)
+        let params = Configuration::new(angle(18.0), Isha::Angle(angle(18.0)))
             .high_latitude_rule(HighLatitudeRule::SeventhOfTheNight)
             .done();
 
-        assert_eq!(params.night_portions().0, 1.0 / 7.0);
-        assert_eq!(params.night_portions().1, 1.0 / 7.0);
+        assert_eq!(params.night_portion(angle(18.0)), 1.0 / 7.0);
     }
 
     #[test]
     fn calculated_night_portions_twilight_angle() {
-        let params = Configuration::new(10.0, 15.0)
+        let params = Configuration::new(angle(10.0), Isha::Angle(angle(15.0)))
             .high_latitude_rule(HighLatitudeRule::TwilightAngle)
             .done();
 
-        assert_eq!(params.night_portions().0, 10.0 / 60.0);
-        assert_eq!(params.night_portions().1, 15.0 / 60.0);
+        assert_eq!(params.night_portion(angle(10.0)), 10.0 / 60.0);
+        assert_eq!(params.night_portion(angle(15.0)), 15.0 / 60.0);
     }
 
     #[test]
@@ -225,9 +291,18 @@ mod tests {
         let params = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
 
         assert_eq!(params.method, Method::NorthAmerica);
-        assert_eq!(params.fajr_angle, 15.0);
-        assert_eq!(params.isha_angle, 15.0);
-        assert_eq!(params.isha_interval, 0);
+        assert_eq!(params.fajr_angle, angle(15.0));
+        assert_eq!(params.isha, Isha::Angle(angle(15.0)));
         assert_eq!(params.madhab, Madhab::Hanafi);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn deserializing_checks_angles() {
+        assert_eq!(
+            serde_json::from_str::<DepressionAngle>("18.5").unwrap(),
+            angle(18.5)
+        );
+        assert!(serde_json::from_str::<DepressionAngle>("95").is_err());
     }
 }

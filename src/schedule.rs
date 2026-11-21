@@ -17,7 +17,7 @@ use crate::astronomy::unit::{Angle, Stride};
 use crate::error::Error;
 use crate::models::coordinates::Coordinates;
 use crate::models::method::Method;
-use crate::models::parameters::Parameters;
+use crate::models::parameters::{Isha, Parameters};
 use crate::models::prayer::Prayer;
 use crate::models::rounding::Rounding;
 
@@ -103,18 +103,18 @@ impl PrayerTimes {
                 .rounded_minute(parameters.rounding);
         let final_sunrise = solar_time
             .sunrise
-            .adjust_time(parameters.time_adjustments(Prayer::Sunrise))
+            .adjust_time(i64::from(parameters.time_adjustments(Prayer::Sunrise)))
             .rounded_minute(parameters.rounding);
         let final_dhuhr = solar_time
             .transit
-            .adjust_time(parameters.time_adjustments(Prayer::Dhuhr))
+            .adjust_time(i64::from(parameters.time_adjustments(Prayer::Dhuhr)))
             .rounded_minute(parameters.rounding);
         let final_asr = asr
-            .adjust_time(parameters.time_adjustments(Prayer::Asr))
+            .adjust_time(i64::from(parameters.time_adjustments(Prayer::Asr)))
             .rounded_minute(parameters.rounding);
         let final_maghrib = ops::adjust_time(
             &solar_time.sunset,
-            parameters.time_adjustments(Prayer::Maghrib),
+            i64::from(parameters.time_adjustments(Prayer::Maghrib)),
         )
         .rounded_minute(parameters.rounding);
         let final_isha =
@@ -231,7 +231,7 @@ impl PrayerTimes {
                 solar_time.sunrise,
             )
         } else {
-            let portion = parameters.night_portions().0;
+            let portion = parameters.night_portion(parameters.fajr_angle);
             let night_fraction = portion * (night.num_seconds() as f64);
 
             solar_time
@@ -241,7 +241,7 @@ impl PrayerTimes {
         };
 
         let mut fajr = solar_time
-            .time_for_solar_angle(Angle::new(-parameters.fajr_angle), false)
+            .time_for_solar_angle(Angle::new(-parameters.fajr_angle.degrees()), false)
             .unwrap_or(safe_fajr);
 
         // special case for moonsighting committee above latitude 55
@@ -257,7 +257,7 @@ impl PrayerTimes {
             fajr = safe_fajr;
         }
 
-        fajr.adjust_time(parameters.time_adjustments(Prayer::Fajr))
+        fajr.adjust_time(i64::from(parameters.time_adjustments(Prayer::Fajr)))
     }
 
     fn calculate_isha(
@@ -267,53 +267,49 @@ impl PrayerTimes {
         coordinates: Coordinates,
         prayer_date: DateTime<Utc>,
     ) -> DateTime<Utc> {
-        let mut isha: DateTime<Utc>;
+        let isha = match parameters.isha {
+            Isha::Interval(minutes) => solar_time.sunset + Duration::minutes(minutes.into()),
+            Isha::Angle(angle) => {
+                let safe_isha = if parameters.method == Method::MoonsightingCommittee {
+                    let day_of_year = prayer_date.ordinal();
 
-        if parameters.isha_interval > 0 {
-            isha = solar_time
-                .sunset
-                .checked_add_signed(Duration::seconds((parameters.isha_interval * 60) as i64))
-                .unwrap();
-        } else {
-            let safe_isha = if parameters.method == Method::MoonsightingCommittee {
-                let day_of_year = prayer_date.ordinal();
+                    ops::season_adjusted_evening_twilight(
+                        coordinates.latitude,
+                        day_of_year,
+                        prayer_date.year() as u32,
+                        solar_time.sunset,
+                        parameters.shafaq,
+                    )
+                } else {
+                    let portion = parameters.night_portion(angle);
+                    let night_fraction = portion * (night.num_seconds() as f64);
 
-                ops::season_adjusted_evening_twilight(
-                    coordinates.latitude,
-                    day_of_year,
-                    prayer_date.year() as u32,
-                    solar_time.sunset,
-                    parameters.shafaq,
-                )
-            } else {
-                let portion = parameters.night_portions().1;
-                let night_fraction = portion * (night.num_seconds() as f64);
+                    solar_time
+                        .sunset
+                        .checked_add_signed(Duration::seconds(night_fraction as i64))
+                        .unwrap()
+                };
 
-                solar_time
-                    .sunset
-                    .checked_add_signed(Duration::seconds(night_fraction as i64))
-                    .unwrap()
-            };
+                let mut isha = solar_time
+                    .time_for_solar_angle(Angle::new(-angle.degrees()), true)
+                    .unwrap_or(safe_isha);
 
-            isha = solar_time
-                .time_for_solar_angle(Angle::new(-parameters.isha_angle), true)
-                .unwrap_or(safe_isha);
+                // special case for moonsighting committee above latitude 55
+                if parameters.method == Method::MoonsightingCommittee
+                    && coordinates.latitude >= 55.0
+                {
+                    let night_fraction = night.num_seconds() / 7;
+                    isha = solar_time
+                        .sunset
+                        .checked_add_signed(Duration::seconds(night_fraction))
+                        .unwrap();
+                }
 
-            // special case for moonsighting committee above latitude 55
-            if parameters.method == Method::MoonsightingCommittee && coordinates.latitude >= 55.0 {
-                let night_fraction = night.num_seconds() / 7;
-                isha = solar_time
-                    .sunset
-                    .checked_add_signed(Duration::seconds(night_fraction))
-                    .unwrap();
+                isha.min(safe_isha)
             }
+        };
 
-            if isha > safe_isha {
-                isha = safe_isha;
-            }
-        }
-
-        isha.adjust_time(parameters.time_adjustments(Prayer::Isha))
+        isha.adjust_time(i64::from(parameters.time_adjustments(Prayer::Isha)))
     }
 
     fn calculate_qiyam(

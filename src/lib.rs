@@ -36,7 +36,7 @@ pub use crate::models::coordinates::{Coordinates, CoordinatesError};
 pub use crate::models::high_altitude_rule::HighLatitudeRule;
 pub use crate::models::madhab::Madhab;
 pub use crate::models::method::Method;
-pub use crate::models::parameters::{Configuration, Parameters};
+pub use crate::models::parameters::{AngleError, Configuration, DepressionAngle, Isha, Parameters};
 pub use crate::models::prayer::Prayer;
 pub use crate::schedule::PrayerTimes;
 pub use chrono::{
@@ -61,7 +61,9 @@ pub mod prelude {
     #[doc(no_inline)]
     pub use crate::models::method::Method;
     #[doc(no_inline)]
-    pub use crate::models::parameters::{Configuration, Parameters};
+    pub use crate::models::parameters::{
+        AngleError, Configuration, DepressionAngle, Isha, Parameters,
+    };
     #[doc(no_inline)]
     pub use crate::models::prayer::Prayer;
     pub use crate::schedule::PrayerTimes;
