@@ -24,6 +24,9 @@ pub enum Error {
     /// The sun doesn't get high enough for the Asr shadow, or only at noon
     /// (near the polar circles in winter).
     NoAsr(NaiveDate),
+    /// The day's times aren't in order at least five minutes apart: near
+    /// the polar circles, where the sun only just rises or sets.
+    TimesOutOfOrder(NaiveDate),
 }
 
 impl fmt::Display for Error {
@@ -39,6 +42,9 @@ impl fmt::Display for Error {
             Error::SunNeverSets(date) => write!(f, "the sun doesn't set on {date}"),
             Error::NoAsr(date) => {
                 write!(f, "the sun doesn't get high enough for Asr on {date}")
+            }
+            Error::TimesOutOfOrder(date) => {
+                write!(f, "the prayer times on {date} are out of order")
             }
         }
     }

@@ -128,7 +128,9 @@ impl Day {
         } else {
             today.below_horizon(parameters.fajr_angle.degrees(), false)
         };
-        let fajr = fajr.map_or(safe_fajr, |fajr| fajr.max(safe_fajr));
+        let fajr = fajr
+            .filter(|&fajr| fajr >= safe_fajr && in_order(fajr, today.sunrise))
+            .unwrap_or(safe_fajr);
 
         let isha = match parameters.isha {
             Isha::Interval(minutes) => today.sunset.plus_minutes(minutes.into()),
@@ -150,7 +152,8 @@ impl Day {
                 } else {
                     today.below_horizon(angle.degrees(), true)
                 };
-                isha.map_or(safe_isha, |isha| isha.min(safe_isha))
+                isha.filter(|&isha| isha <= safe_isha && in_order(today.sunset, isha))
+                    .unwrap_or(safe_isha)
             }
         };
 
@@ -162,7 +165,7 @@ impl Day {
             .filter(|&maghrib| today.sunset < maghrib && maghrib < isha)
             .unwrap_or(today.sunset);
 
-        Ok(Day {
+        let day = Day {
             fajr,
             sunrise: today.sunrise,
             dhuhr: today.transit,
@@ -171,7 +174,28 @@ impl Day {
                 .ok_or(Error::NoAsr(date))?,
             maghrib,
             isha,
-        })
+        };
+        // Near the polar circles the times can crowd or cross; then there
+        // are none (Adhan's guard).
+        match day
+            .times()
+            .windows(2)
+            .all(|pair| in_order(pair[0], pair[1]))
+        {
+            true => Ok(day),
+            false => Err(Error::TimesOutOfOrder(date)),
+        }
+    }
+
+    fn times(&self) -> [Moment; 6] {
+        [
+            self.fajr,
+            self.sunrise,
+            self.dhuhr,
+            self.asr,
+            self.maghrib,
+            self.isha,
+        ]
     }
 
     /// With the adjustments added and rounded.
@@ -189,6 +213,14 @@ impl Day {
             isha: adjust(self.isha, Prayer::Isha),
         }
     }
+}
+
+/// The least time between one prayer time and the next (Adhan's).
+const MIN_GAP_SECONDS: i64 = 5 * 60;
+
+/// Whether `later` is at least five minutes after `earlier`.
+fn in_order(earlier: Moment, later: Moment) -> bool {
+    later.since(earlier) >= MIN_GAP_SECONDS
 }
 
 fn next_day(date: NaiveDate) -> Result<NaiveDate, Error> {
@@ -555,6 +587,20 @@ mod tests {
         assert_eq!(
             PrayerTimes::new(day, jokkmokk, params),
             Err(Error::NoAsr(day))
+        );
+    }
+
+    #[test]
+    fn times_crowding_near_the_polar_circle_are_an_error() {
+        // In Lapland at the December solstice the sun barely clears the
+        // horizon: salah 0.7 gave Dhuhr at 10:39 and Asr at 10:42 UTC.
+        // As in Adhan, times closer than five minutes are no times.
+        let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
+        let lapland = Coordinates::new(66.1, 20.0).unwrap();
+        let day = date(2026, 12, 21);
+        assert_eq!(
+            PrayerTimes::new(day, lapland, params),
+            Err(Error::TimesOutOfOrder(day))
         );
     }
 
