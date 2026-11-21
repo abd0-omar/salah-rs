@@ -286,6 +286,11 @@ impl PrayerTimes {
         }
     }
 
+    /// The middle of the night, from Maghrib to the next Fajr.
+    pub fn middle_of_the_night(&self) -> DateTime<Utc> {
+        self.middle_of_the_night
+    }
+
     /// The prayer whose time has most recently come at `now`; None
     /// before this day's Fajr (the night of the day before).
     pub fn current(&self, now: DateTime<Utc>) -> Option<Prayer> {
