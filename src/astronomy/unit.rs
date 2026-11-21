@@ -12,8 +12,16 @@ pub trait Normalize {
 }
 
 impl Normalize for f64 {
+    /// In [0, max) for a positive max, (max, 0] for a negative one, NaN
+    /// for NaN.
     fn normalized_to_scale(&self, max: f64) -> f64 {
-        self - (max * (self / max).floor())
+        let normalized = self - (max * (self / max).floor());
+        // A tiny negative value rounds up to max itself.
+        if normalized.abs() >= max.abs() {
+            0.0
+        } else {
+            normalized
+        }
     }
 }
 
@@ -143,6 +151,13 @@ mod tests {
         assert_eq!(Angle::new(360.0).unwound().degrees, 0.0);
         assert_eq!(Angle::new(259.0).unwound().degrees, 259.0);
         assert_eq!(Angle::new(2592.0).unwound().degrees, 72.0);
+    }
+
+    #[test]
+    fn unwound_stays_below_360() {
+        // salah 0.7 unwound -1e-17° to 360°, a Qiblah bearing out of range.
+        assert_eq!(Angle::new(-1e-17).unwound().degrees, 0.0);
+        assert_eq!((-1e-17_f64).normalized_to_scale(1.0), 0.0);
     }
 
     #[test]
