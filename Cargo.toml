@@ -33,3 +33,7 @@ std = ["chrono/std"]
 # features = ["libm"]`.
 libm = ["dep:libm"]
 serde = ["dep:serde", "chrono/serde"]
+
+[lints.rust]
+# Kani's proofs are built under cfg(kani): see VERIFICATION.md.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }

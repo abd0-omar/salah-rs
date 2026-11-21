@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// than that of the Shafi madhab.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Debug, Copy, Clone)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Madhab {
     Shafi = 1,
     Hanafi = 2,

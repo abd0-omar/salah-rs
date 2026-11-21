@@ -10,7 +10,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::astronomy::unit::Angle;
+use crate::astronomy::unit::{Angle, Normalize};
 
 /// A place on Earth: a latitude in [-90°, 90°] and a longitude in
 /// [-180°, 180°], both finite. Make one with [`Coordinates::new`].
@@ -43,7 +43,7 @@ impl Coordinates {
         }
         let longitude = match longitude {
             l if (-180.0..=180.0).contains(&l) => l,
-            l => (l + 180.0).rem_euclid(360.0) - 180.0,
+            l => (l + 180.0).normalized_to_scale(360.0) - 180.0,
         };
         Ok(Coordinates {
             latitude,
@@ -67,6 +67,20 @@ impl Coordinates {
 
     pub(crate) fn longitude_angle(&self) -> Angle {
         Angle::new(self.longitude)
+    }
+}
+
+/// Any coordinates `new` makes.
+#[cfg(kani)]
+impl kani::Arbitrary for Coordinates {
+    fn any() -> Self {
+        let (latitude, longitude): (f64, f64) = (kani::any(), kani::any());
+        kani::assume((-90.0..=90.0).contains(&latitude));
+        kani::assume((-180.0..=180.0).contains(&longitude));
+        Coordinates {
+            latitude,
+            longitude,
+        }
     }
 }
 
@@ -99,6 +113,32 @@ impl TryFrom<RawCoordinates> for Coordinates {
 
     fn try_from(raw: RawCoordinates) -> Result<Self, Self::Error> {
         Coordinates::new(raw.latitude, raw.longitude)
+    }
+}
+
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Any two f64 (NaN, infinities, any size) are coordinates exactly when
+    /// the latitude is in [-90, 90] and the longitude finite, and then the
+    /// longitude is in [-180, 180].
+    #[kani::proof]
+    fn new_is_total() {
+        let (latitude, longitude): (f64, f64) = (kani::any(), kani::any());
+        match Coordinates::new(latitude, longitude) {
+            Ok(coordinates) => {
+                assert!(coordinates.latitude() == latitude);
+                assert!((-180.0..=180.0).contains(&coordinates.longitude()));
+                assert!(longitude.is_finite());
+            }
+            Err(CoordinatesError::InvalidLatitude(_)) => {
+                assert!(!(-90.0..=90.0).contains(&latitude));
+            }
+            Err(CoordinatesError::InvalidLongitude(_)) => {
+                assert!(!longitude.is_finite());
+            }
+        }
     }
 }
 

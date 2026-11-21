@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 /// for calculating prayer times.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Debug, Copy, Clone)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Method {
     /// Muslim World League. Standard Fajr time with an angle of 18°.
     /// Earlier Isha time with an angle of 17°.

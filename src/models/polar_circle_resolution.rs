@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// and others estimate the times from a place or a day that has them.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Eq, Debug, Copy, Clone, Default)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum PolarCircleResolution {
     /// No times: the calculation's [`Error`](crate::Error) says why.
     #[default]

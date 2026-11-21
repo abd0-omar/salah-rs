@@ -77,6 +77,79 @@ impl Moment {
     }
 }
 
+/// Any date prayer times are calculated for.
+#[cfg(kani)]
+pub(crate) fn any_supported_date() -> NaiveDate {
+    use chrono::Datelike;
+    let days: i32 = kani::any();
+    kani::assume(
+        (crate::FIRST_DATE.num_days_from_ce()..=crate::LAST_DATE.num_days_from_ce())
+            .contains(&days),
+    );
+    NaiveDate::from_num_days_from_ce_opt(days).unwrap()
+}
+
+/// 00:00 UTC on FIRST_DATE and LAST_DATE, in Unix seconds (a test checks
+/// them against chrono).
+#[cfg(any(kani, test))]
+const SUPPORTED_SECONDS: (i64, i64) = (-30_610_224_000, 32_535_129_600);
+
+#[cfg(kani)]
+impl kani::Arbitrary for Moment {
+    /// Any moment within five days of the supported dates, without chrono
+    /// (which is slow to verify).
+    fn any() -> Self {
+        let seconds: i64 = kani::any();
+        let margin = 5 * 86_400;
+        kani::assume(
+            (SUPPORTED_SECONDS.0 - margin..=SUPPORTED_SECONDS.1 + margin).contains(&seconds),
+        );
+        Moment(seconds)
+    }
+}
+
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Any number of hours (NaN, infinities, any size) on any supported
+    /// date is no time or one within three days of its midnight.
+    #[kani::proof]
+    fn at_hours_is_total_and_near_the_date() {
+        let date = any_supported_date();
+        let hours: f64 = kani::any();
+        if let Some(moment) = Moment::at_hours(date, hours) {
+            assert!(moment.since(Moment::midnight(date)).abs() <= 72 * 3600);
+        }
+    }
+
+    /// Rounding moves a time by under a minute, the right way, onto a whole
+    /// minute (or not at all), once; and the result is a chrono time.
+    #[kani::proof]
+    fn rounding_stays_within_a_minute() {
+        let moment: Moment = kani::any();
+        let rounding: Rounding = kani::any();
+        let rounded = moment.rounded(rounding);
+        let moved = rounded.since(moment);
+        match rounding {
+            Rounding::Nearest => {
+                assert!((-29..=30).contains(&moved));
+            }
+            Rounding::Up => {
+                assert!((0..=59).contains(&moved));
+            }
+            Rounding::None => {
+                assert!(moved == 0);
+            }
+        }
+        if rounding != Rounding::None {
+            assert!(rounded.0.rem_euclid(60) == 0);
+        }
+        assert!(rounded.rounded(rounding) == rounded);
+        assert!(rounded.utc().is_some());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,6 +157,12 @@ mod tests {
     fn at(hms: &str) -> Moment {
         let time: DateTime<Utc> = format!("2015-07-13T{hms}Z").parse().unwrap();
         Moment(time.timestamp())
+    }
+
+    #[test]
+    fn supported_seconds_are_the_supported_dates() {
+        assert_eq!(Moment::midnight(crate::FIRST_DATE).0, SUPPORTED_SECONDS.0);
+        assert_eq!(Moment::midnight(crate::LAST_DATE).0, SUPPORTED_SECONDS.1);
     }
 
     #[test]

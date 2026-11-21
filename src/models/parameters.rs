@@ -55,6 +55,16 @@ impl DepressionAngle {
     }
 }
 
+/// Any angle `new` takes.
+#[cfg(kani)]
+impl kani::Arbitrary for DepressionAngle {
+    fn any() -> Self {
+        let degrees: f64 = kani::any();
+        kani::assume((0.0..=Self::MAX).contains(&degrees));
+        DepressionAngle(degrees)
+    }
+}
+
 impl TryFrom<f64> for DepressionAngle {
     type Error = AngleError;
 
@@ -85,6 +95,7 @@ impl core::error::Error for AngleError {}
 /// When Isha begins.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Debug, Copy, Clone)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Isha {
     /// When the sun is this far below the horizon after sunset.
     Angle(DepressionAngle),
@@ -99,6 +110,7 @@ pub enum Isha {
 /// the parameters that are need.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Debug, Copy, Clone)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub struct Parameters {
     pub method: Method,
     pub fajr_angle: DepressionAngle,
@@ -239,6 +251,30 @@ impl Configuration {
 
     pub fn done(&self) -> Parameters {
         self.parameters
+    }
+}
+
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Any f64 is an angle exactly when it is in [0, 30], and the night
+    /// portion of any angle under any rule is in (0, 1/2].
+    #[kani::proof]
+    fn angles_and_night_portions() {
+        let degrees: f64 = kani::any();
+        match DepressionAngle::new(degrees) {
+            Ok(angle) => {
+                assert!(angle.degrees() == degrees);
+                let parameters: Parameters = kani::any();
+                let portion = parameters.night_portion(angle);
+                assert!((0.0..=0.5).contains(&portion));
+            }
+            Err(AngleError(rejected)) => {
+                assert!(rejected.to_bits() == degrees.to_bits());
+                assert!(!(0.0..=DepressionAngle::MAX).contains(&degrees));
+            }
+        }
     }
 }
 

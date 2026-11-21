@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 /// sunrise, and Qiyam.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Prayer {
     Fajr,
     Sunrise,

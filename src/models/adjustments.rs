@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 /// adding one can't overflow).
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Debug, Copy, Clone, Default)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub struct TimeAdjustment {
     pub fajr: i16,
     pub sunrise: i16,

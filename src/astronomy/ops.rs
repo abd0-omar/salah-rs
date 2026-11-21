@@ -520,6 +520,31 @@ pub fn days_since_solstice(day_of_year: u32, year: u32, latitude: f64) -> u32 {
     (i64::from(day_of_year) - solstice_offset).rem_euclid(days_in_year) as u32
 }
 
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// For any day of any supported year and any latitude, the days since
+    /// the solstice are a day of that year.
+    #[kani::proof]
+    fn days_since_solstice_is_a_day_of_the_year() {
+        let (day, year, latitude): (u32, u32, f64) = (kani::any(), kani::any(), kani::any());
+        kani::assume((1..=366).contains(&day) && (1000..=3000).contains(&year));
+        let days = days_since_solstice(day, year, latitude);
+        assert!(days < if is_leap_year(year) { 366 } else { 365 });
+    }
+
+    /// Julian days of supported dates are computed without overflow, and
+    /// are finite.
+    #[kani::proof]
+    fn julian_day_is_total() {
+        let (year, month, day): (i32, i32, i32) = (kani::any(), kani::any(), kani::any());
+        kani::assume((1000..=3000).contains(&year) && (1..=12).contains(&month));
+        kani::assume((1..=31).contains(&day));
+        assert!(julian_day(year, month, day, 0.0).is_finite());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

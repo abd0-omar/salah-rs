@@ -169,3 +169,19 @@ mod tests {
         assert_eq!((angle_a + angle_b).degrees, 90.0);
     }
 }
+
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Any finite value normalizes into [0, max), for each scale used.
+    #[kani::proof]
+    fn normalized_to_scale_is_in_range() {
+        let value: f64 = kani::any();
+        kani::assume(value.is_finite());
+        for max in [1.0, 24.0, 360.0] {
+            let normalized = value.normalized_to_scale(max);
+            assert!((0.0..max).contains(&normalized));
+        }
+    }
+}

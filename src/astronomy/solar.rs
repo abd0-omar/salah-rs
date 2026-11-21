@@ -238,7 +238,8 @@ mod tests {
         )
     }
 
-    fn raleigh() -> Coordinates {
+    /// Adhan's reference place for its tests.
+    fn reference_place() -> Coordinates {
         Coordinates::new(35.0 + 47.0 / 60.0, -78.0 - 39.0 / 60.0).unwrap()
     }
 
@@ -258,7 +259,7 @@ mod tests {
     #[test]
     fn calculate_solar_time() {
         let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
-        let solar = SolarTime::new(date, raleigh());
+        let solar = SolarTime::new(date, reference_place());
 
         assert_eq!(clock(solar.transit), "17:20");
         assert_eq!(clock(solar.sunrise().unwrap()), "10:08");
@@ -272,7 +273,7 @@ mod tests {
     #[test]
     fn calculate_time_for_solar_angle() {
         let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
-        let solar = SolarTime::new(date, raleigh());
+        let solar = SolarTime::new(date, reference_place());
         let angle = Angle::new(-6.0);
         let twilight_start = solar.time_for_solar_angle(angle, false).unwrap();
         let twilight_end = solar.time_for_solar_angle(angle, true).unwrap();
@@ -305,7 +306,7 @@ mod tests {
 
     #[test]
     fn calculate_corrected_hour_angle() {
-        let coordinates = raleigh();
+        let coordinates = reference_place();
         let julian_day = ops::julian_day(2015, 7, 12, 0.0);
         let prev_solar = SolarCoordinates::new(julian_day - 1.0);
         let solar = SolarCoordinates::new(julian_day);

@@ -23,6 +23,7 @@ use crate::models::method::Method;
 use crate::models::parameters::{DepressionAngle, Isha, Parameters};
 use crate::models::polar_circle_resolution::PolarCircleResolution;
 use crate::models::prayer::Prayer;
+use crate::models::rounding::Rounding;
 use crate::time::Moment;
 
 /// The first date prayer times are calculated for.
@@ -179,16 +180,22 @@ impl Day {
         coordinates: Coordinates,
         parameters: &Parameters,
     ) -> Option<Day> {
-        let steps = (coordinates.latitude.abs() / LATITUDE_STEP).ceil() as u32;
-        (1..=steps).find_map(|step| {
-            let latitude = (coordinates.latitude.abs() - f64::from(step) * LATITUDE_STEP).max(0.0)
-                * coordinates.latitude.signum();
-            let place = Coordinates {
-                latitude,
-                ..coordinates
-            };
-            Day::unresolved(date, place, parameters).ok()
-        })
+        (1..=latitude_steps(coordinates.latitude))
+            .find_map(|steps| Day::at_latitude(date, coordinates, parameters, steps))
+    }
+
+    /// The times `steps` of AqrabBalad's toward the equator, if there are.
+    fn at_latitude(
+        date: NaiveDate,
+        coordinates: Coordinates,
+        parameters: &Parameters,
+        steps: u32,
+    ) -> Option<Day> {
+        let place = Coordinates {
+            latitude: toward_equator(coordinates.latitude, steps),
+            ..coordinates
+        };
+        Day::unresolved(date, place, parameters).ok()
     }
 
     /// The times of the nearest day that has them at the place, a day
@@ -200,11 +207,19 @@ impl Day {
     ) -> Option<Day> {
         (1..=DAYS_SEARCHED)
             .flat_map(|days| [days, -days])
-            .find_map(|days| {
-                let other = date.checked_add_signed(TimeDelta::days(days))?;
-                let day = Day::unresolved(other, coordinates, parameters).ok()?;
-                Some(day.shifted(-days * SECONDS_PER_DAY))
-            })
+            .find_map(|days| Day::moved(date, coordinates, parameters, days))
+    }
+
+    /// The times `days` from `date`, if there are, moved to `date`.
+    fn moved(
+        date: NaiveDate,
+        coordinates: Coordinates,
+        parameters: &Parameters,
+        days: i64,
+    ) -> Option<Day> {
+        let other = date.checked_add_signed(TimeDelta::days(days))?;
+        let day = Day::unresolved(other, coordinates, parameters).ok()?;
+        Some(day.shifted(-days * SECONDS_PER_DAY))
     }
 
     /// Every time `seconds` later.
@@ -351,6 +366,38 @@ const LATITUDE_STEP: f64 = 0.5;
 const DAYS_SEARCHED: i64 = 183;
 const SECONDS_PER_DAY: i64 = 86_400;
 
+/// How many of AqrabBalad's steps reach the equator from `latitude`.
+fn latitude_steps(latitude: f64) -> u32 {
+    (latitude.abs() / LATITUDE_STEP).ceil() as u32
+}
+
+/// `steps` of AqrabBalad's toward the equator from `latitude`, stopping
+/// there.
+fn toward_equator(latitude: f64, steps: u32) -> f64 {
+    (latitude.abs() - f64::from(steps) * LATITUDE_STEP).max(0.0) * latitude.signum()
+}
+
+/// The middle of the night from `maghrib` to `fajr`, and the start of its
+/// last third, rounded (Adhan's SunnahTimes).
+/// In whole seconds, truncated toward zero: what Adhan's floating-point
+/// halves and two thirds come to for any night under 2^52 seconds.
+fn night_times(maghrib: Moment, fajr: Moment, rounding: Rounding) -> (Moment, Moment) {
+    let night = fajr.since(maghrib);
+    let middle = maghrib.plus(night / 2).rounded(rounding);
+    let last_third = maghrib.plus(night * 2 / 3).rounded(rounding);
+    (middle, last_third)
+}
+
+/// Of `times`, the index of the last at or before `now`.
+fn last_at_or_before<T: PartialOrd>(times: &[T], now: &T) -> Option<usize> {
+    times.iter().rposition(|time| time <= now)
+}
+
+/// Of `times`, the index of the first after `now`.
+fn first_after<T: PartialOrd>(times: &[T], now: &T) -> Option<usize> {
+    times.iter().position(|time| time > now)
+}
+
 /// The least time between one prayer time and the next (Adhan's).
 const MIN_GAP_SECONDS: i64 = 5 * 60;
 
@@ -379,18 +426,21 @@ impl PrayerTimes {
         let fajr_tomorrow = Day::new(next_day(date)?, coordinates, &parameters)?
             .adjusted(&parameters)
             .fajr;
+        PrayerTimes::from_days(date, coordinates, parameters, day, fajr_tomorrow)
+    }
 
-        // The night from Maghrib to the next Fajr: its middle and the start
-        // of its last third (Adhan's SunnahTimes).
-        let night = fajr_tomorrow.since(day.maghrib) as f64;
-        let middle_of_the_night = day
-            .maghrib
-            .plus((night / 2.0) as i64)
-            .rounded(parameters.rounding);
-        let qiyam = day
-            .maghrib
-            .plus((night * (2.0 / 3.0)) as i64)
-            .rounded(parameters.rounding);
+    /// The times of `day` (adjusted and rounded), with the night up to
+    /// `fajr_tomorrow`: its middle and the start of its last third (Adhan's
+    /// SunnahTimes).
+    fn from_days(
+        date: NaiveDate,
+        coordinates: Coordinates,
+        parameters: Parameters,
+        day: Day,
+        fajr_tomorrow: Moment,
+    ) -> Result<PrayerTimes, Error> {
+        let (middle_of_the_night, qiyam) =
+            night_times(day.maghrib, fajr_tomorrow, parameters.rounding);
 
         let utc = |time: Moment| time.utc().ok_or(Error::DateOutOfRange(date));
         Ok(PrayerTimes {
@@ -470,23 +520,232 @@ impl PrayerTimes {
     /// The prayer whose time has most recently come at `now`; None
     /// before this day's Fajr (the night of the day before).
     pub fn current(&self, now: DateTime<Utc>) -> Option<Prayer> {
-        Prayer::IN_ORDER
-            .into_iter()
-            .rev()
-            .find(|&prayer| self.time(prayer) <= now)
+        let index = last_at_or_before(&Prayer::IN_ORDER.map(|p| self.time(p)), &now)?;
+        Prayer::IN_ORDER.get(index).copied()
     }
 
     /// The next prayer to come after `now`; None once tomorrow's Fajr has
     /// come (that is the next day's times).
     pub fn next(&self, now: DateTime<Utc>) -> Option<Prayer> {
-        Prayer::IN_ORDER
-            .into_iter()
-            .find(|&prayer| self.time(prayer) > now)
+        let index = first_after(&Prayer::IN_ORDER.map(|p| self.time(p)), &now)?;
+        Prayer::IN_ORDER.get(index).copied()
     }
 
     /// The time from `now` to the next prayer, as in [`next`](Self::next).
     pub fn time_remaining(&self, now: DateTime<Utc>) -> Option<TimeDelta> {
         self.next(now).map(|prayer| self.time(prayer) - now)
+    }
+}
+
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+    use crate::time::any_supported_date;
+
+    fn any_events() -> Events {
+        Events {
+            sunrise: kani::any(),
+            transit: kani::any(),
+            sunset: kani::any(),
+            tomorrow_sunrise: kani::any(),
+            fajr: kani::any(),
+            isha: kani::any(),
+            maghrib: kani::any(),
+            asr: kani::any(),
+        }
+    }
+
+    #[allow(dead_code)] // Used by a stub.
+    fn any_day() -> Day {
+        Day {
+            fajr: kani::any(),
+            sunrise: kani::any(),
+            dhuhr: kani::any(),
+            asr: kani::any(),
+            maghrib: kani::any(),
+            isha: kani::any(),
+        }
+    }
+
+    fn any_latitude() -> f64 {
+        let latitude: f64 = kani::any();
+        kani::assume((-90.0..=90.0).contains(&latitude));
+        latitude
+    }
+
+    fn no_adjustments(parameters: &Parameters) -> bool {
+        [
+            Prayer::Fajr,
+            Prayer::Sunrise,
+            Prayer::Dhuhr,
+            Prayer::Asr,
+            Prayer::Maghrib,
+            Prayer::Isha,
+        ]
+        .iter()
+        .all(|&prayer| parameters.time_adjustments(prayer) == 0)
+    }
+
+    /// The day's rules, for any events (any moments near the supported
+    /// dates, each there or not), any date, latitude and parameters (every
+    /// method, madhab, high-latitude rule, rounding, angle and adjustment),
+    /// never panic. A day they make has its six times in order at least
+    /// five minutes apart, and, without adjustments, still in order once
+    /// rounded (rounding as its proven bounds: stubbed); a day they don't
+    /// is NoAsr or TimesOutOfOrder of the date.
+    /// Moment::rounded, for the proof below: any moment within what
+    /// time::proofs::rounding_stays_within_a_minute proves rounding moves a
+    /// time by (−29 to +59 seconds, whatever the rounding).
+    #[allow(dead_code)] // Used by kani::stub.
+    fn any_rounding(moment: Moment, _: Rounding) -> Moment {
+        let moved: i64 = kani::any();
+        kani::assume((-29..=59).contains(&moved));
+        moment.plus(moved)
+    }
+
+    #[kani::proof]
+    #[kani::stub(Moment::rounded, any_rounding)]
+    fn day_rules_are_total_and_ordered() {
+        let date = any_supported_date();
+        let parameters: Parameters = kani::any();
+        match Day::from_events(&any_events(), date, any_latitude(), &parameters) {
+            Ok(day) => {
+                let times = day.times();
+                for pair in times.windows(2) {
+                    assert!(pair[1].since(pair[0]) >= MIN_GAP_SECONDS);
+                }
+                let adjusted = day.adjusted(&parameters).times();
+                if no_adjustments(&parameters) {
+                    for pair in adjusted.windows(2) {
+                        assert!(pair[0] < pair[1]);
+                    }
+                }
+            }
+            Err(error) => {
+                assert!(error == Error::NoAsr(date) || error == Error::TimesOutOfOrder(date));
+            }
+        }
+    }
+
+    /// The middle and last third of any night are within it, in order,
+    /// rounding aside.
+    #[kani::proof]
+    fn night_times_are_in_order() {
+        let (maghrib, fajr): (Moment, Moment) = (kani::any(), kani::any());
+        kani::assume(maghrib < fajr);
+        let (middle, last_third) = night_times(maghrib, fajr, kani::any());
+        assert!(maghrib.plus(-60) <= middle);
+        assert!(middle <= last_third);
+        assert!(last_third <= fajr.plus(60));
+    }
+
+    /// For any times and any moment: current is the last that has come,
+    /// next the first that hasn't, and None only when there's none.
+    #[kani::proof]
+    fn current_and_next_bracket_the_moment() {
+        let times: [i64; 8] = kani::any();
+        let now: i64 = kani::any();
+        let current = last_at_or_before(&times, &now);
+        let next = first_after(&times, &now);
+        for (j, &time) in times.iter().enumerate() {
+            match current {
+                Some(i) if j == i => assert!(time <= now),
+                Some(i) if j > i => assert!(time > now),
+                Some(_) => {}
+                None => assert!(time > now),
+            }
+            match next {
+                Some(i) if j == i => assert!(time > now),
+                Some(i) if j < i => assert!(time <= now),
+                Some(_) => {}
+                None => assert!(time <= now),
+            }
+        }
+        assert!(current.is_none_or(|i| i < times.len()));
+        assert!(next.is_none_or(|i| i < times.len()));
+    }
+
+    /// Moment::utc, for the proofs below: proven total by
+    /// time::proofs::rounding_stays_within_a_minute, and slow to verify.
+    #[allow(dead_code)] // Used by kani::stub.
+    fn any_utc(_: Moment) -> Option<DateTime<Utc>> {
+        Some(DateTime::UNIX_EPOCH)
+    }
+
+    /// The astronomy, for the proof below: any events, or either error it
+    /// can return.
+    #[allow(dead_code)] // Used by kani::stub.
+    fn any_events_result(date: NaiveDate, _: Coordinates, _: &Parameters) -> Result<Events, Error> {
+        match kani::any::<u8>() {
+            0 => Err(Error::SunNeverRises(date)),
+            1 => Err(Error::SunNeverSets(date)),
+            _ => Ok(any_events()),
+        }
+    }
+
+    /// PrayerTimes::new, the public calculation, for any date chrono has
+    /// (supported or not), any coordinates, and any parameters without a
+    /// polar circle resolution, with the astronomy any events at all and
+    /// Moment::utc stubbed, never panics: it returns times or an Error, and
+    /// DateOutOfRange outside the supported dates.
+    #[kani::proof]
+    #[kani::stub(Events::new, any_events_result)]
+    #[kani::stub(Moment::utc, any_utc)]
+    fn prayer_times_new_is_total() {
+        let days: i32 = kani::any();
+        let Some(date) = NaiveDate::from_num_days_from_ce_opt(days) else {
+            return;
+        };
+        let mut parameters: Parameters = kani::any();
+        parameters.polar_circle_resolution = PolarCircleResolution::Unresolved;
+        let result = PrayerTimes::new(date, kani::any(), parameters);
+        if !(FIRST_DATE..=LAST_DATE).contains(&date) {
+            assert!(result == Err(Error::DateOutOfRange(date)));
+        }
+    }
+
+    /// AqrabBalad's latitudes are latitudes, closer to the equator, on the
+    /// same side of it.
+    #[kani::proof]
+    fn latitudes_toward_the_equator_are_latitudes() {
+        let latitude = any_latitude();
+        let steps: u32 = kani::any();
+        kani::assume((1..=180).contains(&steps));
+        let closer = toward_equator(latitude, steps);
+        assert!(closer.abs() <= latitude.abs());
+        assert!(closer * latitude >= 0.0);
+        assert!(Coordinates::new(closer, 0.0).is_ok());
+    }
+
+    /// A day, for the proof below: any times, or none.
+    #[allow(dead_code)] // Used by kani::stub.
+    fn any_day_result(date: NaiveDate, _: Coordinates, _: &Parameters) -> Result<Day, Error> {
+        match kani::any() {
+            true => Ok(any_day()),
+            false => Err(Error::TimesOutOfOrder(date)),
+        }
+    }
+
+    /// AqrabBalad tries at most 180 latitudes, and AqrabYaum moves days by
+    /// at most 183; with each day they try any times or none (stubbed),
+    /// each try (every iteration of their searches) never panics. The
+    /// searches around them are std's iterators over those integer ranges,
+    /// so the resolutions never panic.
+    #[kani::proof]
+    #[kani::stub(Day::unresolved, any_day_result)]
+    fn polar_circle_resolution_steps_are_total() {
+        let date = any_supported_date();
+        let coordinates: Coordinates = kani::any();
+        let parameters: Parameters = kani::any();
+        assert!(latitude_steps(coordinates.latitude) <= 180);
+
+        let steps: u32 = kani::any();
+        kani::assume((1..=180).contains(&steps));
+        let _ = Day::at_latitude(date, coordinates, &parameters, steps);
+
+        let days: i64 = kani::any();
+        kani::assume(days != 0 && (-DAYS_SEARCHED..=DAYS_SEARCHED).contains(&days));
+        let _ = Day::moved(date, coordinates, &parameters, days);
     }
 }
 
@@ -516,7 +775,7 @@ mod tests {
         .map(|p| times.time(p).format("%-k:%M").to_string())
     }
 
-    fn raleigh_2015_07_12() -> PrayerTimes {
+    fn reference_day() -> PrayerTimes {
         let params = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
         PrayerTimes::new(
             date(2015, 7, 12),
@@ -531,7 +790,7 @@ mod tests {
         // Fajr 08:42, sunrise 10:08, Dhuhr 17:21, Asr 22:22, Maghrib 00:32,
         // Isha 01:57, the last third of the night 05:59, the next Fajr
         // 08:43 (UTC).
-        let times = raleigh_2015_07_12();
+        let times = reference_day();
         let at = |d, h, m| Utc.with_ymd_and_hms(2015, 7, d, h, m, 0).unwrap();
 
         assert_eq!(times.current(at(12, 8, 0)), None);
@@ -550,7 +809,7 @@ mod tests {
         // salah 0.7's next() and time_remaining() went through current(),
         // which panicked before Fajr (PR #23) and on any day but today,
         // reading the clock itself (issue #17).
-        let times = raleigh_2015_07_12();
+        let times = reference_day();
         let at = |d, h, m| Utc.with_ymd_and_hms(2015, 7, d, h, m, 0).unwrap();
 
         assert_eq!(times.next(at(12, 8, 0)), Some(Prayer::Fajr));

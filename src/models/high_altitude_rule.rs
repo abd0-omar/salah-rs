@@ -11,6 +11,7 @@ use crate::models::coordinates::Coordinates;
 /// Rule for approximating Fajr and Isha at high latitudes
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Debug, Copy, Clone)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum HighLatitudeRule {
     /// Fajr won't be earlier than the midpoint of the night and isha
     /// won't be later than the midpoint of the night. This is the default

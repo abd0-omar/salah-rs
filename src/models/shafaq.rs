@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// for the different ways to calculate Isha.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Debug, Copy, Clone)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Shafaq {
     /// General is a combination of Ahmer and Abyad.
     General,
