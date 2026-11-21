@@ -157,13 +157,18 @@ pub fn altitude_of_celestial_body(
     Angle::from_radians((term1 + term2).asin())
 }
 
+// The fraction of the UTC day of the sun's transit, near local mean noon:
+// within half a day of 12:00 - longitude / 15 hours. That keeps the transit
+// on the date at the place, either side of the date line (east of 180° - 4°
+// the sun can cross the meridian before 00:00 UTC), and the date's noon at
+// -180° about 24:00 UTC, at 180° about 00:00.
 pub fn approximate_transit(longitude: Angle, sidereal_time: Angle, right_ascension: Angle) -> f64 {
     // Equation from page Astronomical Algorithms 102
     let longitude_angle = longitude * Angle::new(-1.0);
+    let transit = (right_ascension + longitude_angle - sidereal_time).degrees / 360.0;
+    let mean_noon = (12.0 - longitude.degrees / 15.0) / 24.0;
 
-    ((right_ascension + longitude_angle - sidereal_time) / Angle::new(360.0))
-        .degrees
-        .normalized_to_scale(1.0)
+    mean_noon + (transit - mean_noon + 0.5).normalized_to_scale(1.0) - 0.5
 }
 
 // The time at which the sun is at its highest point in the sky (in universal time)

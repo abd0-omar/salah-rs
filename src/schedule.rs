@@ -494,6 +494,36 @@ mod tests {
     }
 
     #[test]
+    fn noon_near_the_date_line_is_on_the_date() {
+        // salah 0.7 put the transit anywhere in the UTC day, so east of
+        // about 176°E, when the equation of time brings noon before 00:00
+        // UTC, it took the next day's: Suva's Dhuhr on 3 November (11:51
+        // at UTC+12) came out on the 4th.
+        let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
+        let suva = Coordinates::new(-18.14, 178.44).unwrap();
+        let times = PrayerTimes::new(date(2026, 11, 3), suva, params).unwrap();
+        assert_eq!(
+            times.time(Prayer::Dhuhr),
+            Utc.with_ymd_and_hms(2026, 11, 2, 23, 51, 0).unwrap()
+        );
+
+        // On each side of the date line, noon is near 12:00 local mean
+        // time on the date: 00:00 UTC that day at 180°, 24:00 at -180°.
+        for (longitude, offset) in [(180.0, 0), (-180.0, 24), (179.9, 0), (-179.9, 24)] {
+            let place = Coordinates::new(0.0, longitude).unwrap();
+            for day in [date(2026, 2, 11), date(2026, 11, 3)] {
+                let dhuhr = PrayerTimes::new(day, place, params)
+                    .unwrap()
+                    .time(Prayer::Dhuhr);
+                let mean_noon =
+                    day.and_hms_opt(0, 0, 0).unwrap().and_utc() + chrono::Duration::hours(offset);
+                let off = (dhuhr - mean_noon).num_minutes().abs();
+                assert!(off < 30, "{longitude} on {day}: Dhuhr {dhuhr}");
+            }
+        }
+    }
+
+    #[test]
     fn dates_outside_the_supported_years_are_errors() {
         // salah 0.7 panicked in its date arithmetic at chrono's last date.
         let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
