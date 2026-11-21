@@ -144,7 +144,7 @@ mod tests {
 
         assert_eq!(
             clock(&times, &sgt),
-            ["5:50", "7:12", "13:15", "16:39", "19:15", "20:29"]
+            ["5:50", "7:12", "13:15", "16:38", "19:15", "20:29"]
         );
     }
 
@@ -159,7 +159,8 @@ mod tests {
         //
         // It would be a good idea to get some more information on how the Fajr
         // and Isha are calculated, since that's where the biggest variance is;
-        // however, the other times are within the 2 minute variance.
+        // however, the other times are within the 2 minute variance. With
+        // these adjustments the times are Adhan's.
         params.method_adjustments = Adjustment::new()
             .fajr(-10)
             .sunrise(-2)
@@ -175,7 +176,7 @@ mod tests {
 
         assert_eq!(
             clock(&times, &wib),
-            ["4:15", "5:45", "12:03", "15:28", "18:16", "19:31"]
+            ["4:15", "5:45", "12:03", "15:27", "18:16", "19:31"]
         );
     }
 

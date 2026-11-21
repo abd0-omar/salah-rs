@@ -197,6 +197,9 @@ pub fn corrected_transit(
     (approximate_transit + angle_delta.degrees) * 24.0
 }
 
+// When the sun's center is at `angle` (degrees above the horizon), before
+// or after transit, in hours after 00:00 UTC; NaN if it isn't that day.
+#[allow(clippy::too_many_arguments)]
 pub fn corrected_hour_angle(
     approximate_transit: f64,
     angle: Angle,
@@ -210,48 +213,127 @@ pub fn corrected_hour_angle(
     previous_declination: Angle,
     next_declination: Angle,
 ) -> f64 {
-    // Equation from page Astronomical Algorithms 102
-    let longitude_angle = coordinates.longitude_angle() * Angle::new(-1.0);
-    let term1 = angle.radians().sin()
-        - (coordinates.latitude_angle().radians().sin() * declination.radians().sin());
-    let term2 = coordinates.latitude_angle().radians().cos() * declination.radians().cos();
-    let term_angle = Angle::from_radians((term1 / term2).acos());
+    let h0 = angle.degrees;
+    let longitude = coordinates.longitude_angle();
+    let latitude = coordinates.latitude_angle();
+    let longitude_angle = longitude * Angle::new(-1.0);
 
-    let adjusted_approx_transit = if after_transit {
-        approximate_transit + (term_angle.degrees / 360.0)
-    } else {
-        approximate_transit - (term_angle.degrees / 360.0)
+    // The altitude of the sun at time m (a fraction of the day), with the
+    // right ascension and declination interpolated to m: Astronomical
+    // Algorithms page 103.
+    let altitude_at = |m: f64| {
+        let plane_angle = Angle::new(sidereal_time.degrees + (360.985647 * m)).unwound();
+        let interpolated = interpolate_angles(
+            right_ascension,
+            previous_right_ascension,
+            next_right_ascension,
+            m,
+        )
+        .unwound();
+        let declination_angle = Angle::new(interpolate(
+            declination.degrees,
+            previous_declination.degrees,
+            next_declination.degrees,
+            m,
+        ));
+        let hour_angle = plane_angle - longitude_angle - interpolated;
+        let altitude = altitude_of_celestial_body(latitude, declination_angle, hour_angle);
+        (altitude.degrees, declination_angle, hour_angle)
     };
 
-    let plane_angle =
-        Angle::new(sidereal_time.degrees + (360.985647 * adjusted_approx_transit)).unwound();
-    let interpolated_angles = interpolate_angles(
+    // The altitude is highest at transit and lowest at the lower
+    // culmination, and changes monotonically between them (the declination
+    // barely moves in half a day), so the angle is reached once between
+    // transit and the adjacent lower culmination if, and only if, it lies
+    // between their altitudes (Note 2 on page 104). The lower culmination
+    // is the transit across the opposite meridian.
+    let transit = corrected_transit(
+        approximate_transit,
+        longitude,
+        sidereal_time,
         right_ascension,
         previous_right_ascension,
         next_right_ascension,
-        adjusted_approx_transit,
-    )
-    .unwound();
-    let declination_angle = Angle::new(interpolate(
-        declination.degrees,
-        previous_declination.degrees,
-        next_declination.degrees,
-        adjusted_approx_transit,
-    ));
-    let adjusted_angles = plane_angle - longitude_angle - interpolated_angles;
-    let celestial_body_altitude = altitude_of_celestial_body(
-        coordinates.latitude_angle(),
-        declination_angle,
-        adjusted_angles,
-    );
-    let term3 = (celestial_body_altitude - angle).degrees;
-    let term4 = 360.0
-        * declination_angle.radians().cos()
-        * coordinates.latitude_angle().radians().cos()
-        * adjusted_angles.radians().sin();
-    let angle_delta = term3 / term4;
+    ) / 24.0;
+    let lower_culmination = corrected_transit(
+        if after_transit {
+            transit + 0.5
+        } else {
+            transit - 0.5
+        },
+        longitude + Angle::new(180.0),
+        sidereal_time,
+        right_ascension,
+        previous_right_ascension,
+        next_right_ascension,
+    ) / 24.0;
+    // Written so that NaN altitudes are no crossing too.
+    if !(altitude_at(transit).0 > h0) || !(altitude_at(lower_culmination).0 < h0) {
+        return f64::NAN;
+    }
+    // A bracket around the crossing: above h0 on the transit side, below
+    // it on the lower culmination side.
+    let mut lo = transit.min(lower_culmination);
+    let mut hi = transit.max(lower_culmination);
 
-    (adjusted_approx_transit + angle_delta) * 24.0
+    // The first guess from equations (15.1) and (15.2) on page 102, with the
+    // declination at 0h; the middle of the bracket if that is outside it.
+    let cos_h0 = (angle.radians().sin() - latitude.radians().sin() * declination.radians().sin())
+        / (latitude.radians().cos() * declination.radians().cos());
+    let h0_degrees = Angle::from_radians(cos_h0.acos()).degrees;
+    let guess = if after_transit {
+        approximate_transit + h0_degrees / 360.0
+    } else {
+        approximate_transit - h0_degrees / 360.0
+    };
+    let mut m = if guess > lo && guess < hi {
+        guess
+    } else {
+        (lo + hi) / 2.0
+    };
+
+    // Correct m by dm = (h - h0) / (360 cos δ cos φ sin H) (page 103) until
+    // the correction is negligible, as in Example 15.a. Near the transit or
+    // the lower culmination sin H nears zero and the step can overshoot, so
+    // a step that would leave the bracket, or isn't shrinking fast enough,
+    // halves the bracket instead (chapter 5's bisection, page 52): rtsafe
+    // in Numerical Recipes, section 9.4. This always converges, to the
+    // solution the textbook iteration finds when it does.
+    let mut dm = hi - lo;
+    let mut previous_dm = dm;
+    for _ in 0..100 {
+        let (h, declination_angle, hour_angle) = altitude_at(m);
+        let f = h - h0;
+        if f == 0.0 {
+            break;
+        }
+        if (f > 0.0) == after_transit {
+            lo = m;
+        } else {
+            hi = m;
+        }
+        // The altitude's rate of change, in degrees per day.
+        let slope = -360.0
+            * declination_angle.radians().cos()
+            * latitude.radians().cos()
+            * hour_angle.radians().sin();
+        let newton_leaves_bracket = ((m - hi) * slope - f) * ((m - lo) * slope - f) >= 0.0;
+        let newton_too_slow = (2.0 * f).abs() > (previous_dm * slope).abs();
+        previous_dm = dm;
+        if newton_leaves_bracket || newton_too_slow {
+            dm = (hi - lo) / 2.0;
+            m = lo + dm;
+        } else {
+            dm = -f / slope;
+            m += dm;
+        }
+        // About 0.1 milliseconds.
+        if dm.abs() < 1e-9 {
+            break;
+        }
+    }
+
+    m * 24.0
 }
 
 // Interpolation of a value given equidistant previous and

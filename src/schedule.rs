@@ -524,6 +524,27 @@ mod tests {
     }
 
     #[test]
+    fn sunset_and_twilight_converge_near_the_polar_circle() {
+        // salah 0.7 took one Newton step from the 0h declination, which
+        // near the end of the midnight sun is far off: in Tromsø it put
+        // sunset 16 minutes early in July and Isha 34 minutes late in
+        // September. Adhan's times.
+        let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
+        let tromso = Coordinates::new(69.65, 18.96).unwrap();
+
+        let july = PrayerTimes::new(date(2026, 7, 26), tromso, params).unwrap();
+        assert_eq!(
+            july.time(Prayer::Maghrib),
+            Utc.with_ymd_and_hms(2026, 7, 26, 22, 13, 0).unwrap()
+        );
+        let september = PrayerTimes::new(date(2026, 9, 14), tromso, params).unwrap();
+        assert_eq!(
+            september.time(Prayer::Isha),
+            Utc.with_ymd_and_hms(2026, 9, 14, 22, 6, 0).unwrap()
+        );
+    }
+
+    #[test]
     fn dates_outside_the_supported_years_are_errors() {
         // salah 0.7 panicked in its date arithmetic at chrono's last date.
         let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);

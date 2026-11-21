@@ -280,6 +280,7 @@ mod tests {
             next_solar.declination,
         );
 
-        assert_eq!(sunrise_time, 10.131800480632849);
+        // 10:07:54 UTC, iterated to convergence.
+        assert!((sunrise_time - 10.131801057008328).abs() < 1e-9);
     }
 }
