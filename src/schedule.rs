@@ -76,6 +76,13 @@ impl SolarDay {
     }
 }
 
+/// The first date prayer times are calculated for.
+pub const FIRST_DATE: NaiveDate = NaiveDate::from_ymd_opt(1000, 1, 1).unwrap();
+/// The last date prayer times are calculated for. The astronomical series
+/// are Meeus's, made for the centuries around 2000; the bounds keep every
+/// date and time far from chrono's limits.
+pub const LAST_DATE: NaiveDate = NaiveDate::from_ymd_opt(3000, 12, 31).unwrap();
+
 impl PrayerTimes {
     /// The prayer times of the solar day of the UTC date `date`, or why
     /// they can't be calculated.
@@ -84,6 +91,9 @@ impl PrayerTimes {
         coordinates: Coordinates,
         parameters: Parameters,
     ) -> Result<PrayerTimes, Error> {
+        if !(FIRST_DATE..=LAST_DATE).contains(&date) {
+            return Err(Error::DateOutOfRange(date));
+        }
         let prayer_date = date.and_time(chrono::NaiveTime::MIN).and_utc();
         let tomorrow = prayer_date.tomorrow();
         let solar_time = SolarDay::new(date, coordinates)?;
@@ -483,6 +493,26 @@ mod tests {
             times.time(Prayer::Maghrib),
             Utc.with_ymd_and_hms(2026, 11, 9, 0, 0, 0).unwrap()
         );
+    }
+
+    #[test]
+    fn dates_outside_the_supported_years_are_errors() {
+        // salah 0.7 panicked in its date arithmetic at chrono's last date.
+        let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
+        let mecca = Coordinates::new(21.4225, 39.8262).unwrap();
+        for date in [
+            NaiveDate::MAX,
+            NaiveDate::MIN,
+            date(999, 12, 31),
+            date(3001, 1, 1),
+        ] {
+            assert_eq!(
+                PrayerTimes::new(date, mecca, params),
+                Err(Error::DateOutOfRange(date))
+            );
+        }
+        assert!(PrayerTimes::new(FIRST_DATE, mecca, params).is_ok());
+        assert!(PrayerTimes::new(LAST_DATE, mecca, params).is_ok());
     }
 
     #[test]

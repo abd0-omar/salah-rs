@@ -29,7 +29,6 @@ mod error;
 mod models;
 mod schedule;
 
-pub use crate::astronomy::unit::Stride;
 pub use crate::error::Error;
 pub use crate::models::adjustments::{Adjustment, TimeAdjustment};
 pub use crate::models::coordinates::{Coordinates, CoordinatesError};
@@ -38,7 +37,7 @@ pub use crate::models::madhab::Madhab;
 pub use crate::models::method::Method;
 pub use crate::models::parameters::{AngleError, Configuration, DepressionAngle, Isha, Parameters};
 pub use crate::models::prayer::Prayer;
-pub use crate::schedule::PrayerTimes;
+pub use crate::schedule::{FIRST_DATE, LAST_DATE, PrayerTimes};
 pub use chrono::{
     DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Timelike, Utc, Weekday,
 };
@@ -48,7 +47,6 @@ pub mod prelude {
     #[doc(no_inline)]
     pub use crate::astronomy::qiblah::Qiblah;
     #[doc(no_inline)]
-    pub use crate::astronomy::unit::Stride;
     #[doc(no_inline)]
     pub use crate::error::Error;
     #[doc(no_inline)]
@@ -66,7 +64,7 @@ pub mod prelude {
     };
     #[doc(no_inline)]
     pub use crate::models::prayer::Prayer;
-    pub use crate::schedule::PrayerTimes;
+    pub use crate::schedule::{FIRST_DATE, LAST_DATE, PrayerTimes};
     #[doc(no_inline)]
     pub use chrono::{
         DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Timelike, Utc, Weekday,

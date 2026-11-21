@@ -7,7 +7,6 @@
 use std::f64::consts::PI;
 use std::ops::{Add, Div, Mul, Sub};
 
-use crate::astronomy::ops;
 use crate::models::rounding::Rounding;
 use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike};
 
@@ -22,10 +21,8 @@ impl Normalize for f64 {
 }
 
 /// Convenience methods for the DateTime type.
-pub trait Stride {
+pub(crate) trait Stride {
     fn tomorrow(&self) -> Self;
-    fn yesterday(&self) -> Self;
-    fn julian_day(&self) -> f64;
     fn adjust_time(&self, minutes: i64) -> Self;
     fn next_date(&self, fwd: bool) -> Self;
     fn rounded_minute(&self, rounding: Rounding) -> Self;
@@ -35,21 +32,6 @@ impl<Tz: TimeZone> Stride for DateTime<Tz> {
     /// Returns the date/time for tomorrow.
     fn tomorrow(&self) -> Self {
         self.next_date(true)
-    }
-
-    /// Returns the date/time for yesterday.
-    fn yesterday(&self) -> Self {
-        self.next_date(false)
-    }
-
-    /// Returns the Julian day.
-    fn julian_day(&self) -> f64 {
-        ops::julian_day(
-            self.year() as i32,
-            self.month() as i32,
-            self.day() as i32,
-            0.0,
-        )
     }
 
     fn rounded_minute(&self, rounding: Rounding) -> Self {
