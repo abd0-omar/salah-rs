@@ -5,6 +5,7 @@
 //
 
 pub mod adjustments;
+pub mod coordinates;
 pub mod high_altitude_rule;
 pub mod madhab;
 pub mod method;

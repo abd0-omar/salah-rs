@@ -9,7 +9,8 @@ use std::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::astronomy::unit::{Angle, Coordinates};
+use crate::astronomy::unit::Angle;
+use crate::models::coordinates::Coordinates;
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
@@ -19,7 +20,10 @@ impl Qiblah {
     pub fn new(location_coordinates: Coordinates) -> Self {
         // Equation from "Spherical Trigonometry For the use
         // of colleges and schools" page 50
-        let makkah_coordinates = Coordinates::new(21.4225241, 39.8261818);
+        let makkah_coordinates = Coordinates {
+            latitude: 21.4225241,
+            longitude: 39.8261818,
+        };
         let term1 = (makkah_coordinates.longitude_angle().radians()
             - location_coordinates.longitude_angle().radians())
         .sin();
@@ -51,7 +55,7 @@ mod tests {
 
     #[test]
     fn qiblah_direction_from_nyc_in_north_america() {
-        let nyc = Coordinates::new(40.7128, -74.0059);
+        let nyc = Coordinates::new(40.7128, -74.0059).unwrap();
         let qiblah = Qiblah::new(nyc);
 
         assert!((qiblah.value() - 58.4817635).abs() < 1e-7);
@@ -59,7 +63,7 @@ mod tests {
 
     #[test]
     fn qiblah_direction_from_sf_in_north_america() {
-        let sf = Coordinates::new(37.7749, -122.4194);
+        let sf = Coordinates::new(37.7749, -122.4194).unwrap();
         let qiblah = Qiblah::new(sf);
 
         assert_eq!(qiblah.value(), 18.843822245692426);
@@ -67,7 +71,7 @@ mod tests {
 
     #[test]
     fn qiblah_direction_from_dc_in_north_america() {
-        let dc = Coordinates::new(38.9072, -77.0369);
+        let dc = Coordinates::new(38.9072, -77.0369).unwrap();
         let qiblah = Qiblah::new(dc);
 
         assert_eq!(qiblah.value(), 56.56046821463599);
@@ -75,7 +79,7 @@ mod tests {
 
     #[test]
     fn qiblah_direction_from_anchorage_in_north_america() {
-        let dc = Coordinates::new(61.2181, -149.9003);
+        let dc = Coordinates::new(61.2181, -149.9003).unwrap();
         let qiblah = Qiblah::new(dc);
 
         assert_eq!(qiblah.value(), 350.8830761159853);
@@ -83,7 +87,7 @@ mod tests {
 
     #[test]
     fn qiblah_directioon_from_sydney_australia() {
-        let sydney = Coordinates::new(-33.8688, 151.2093);
+        let sydney = Coordinates::new(-33.8688, 151.2093).unwrap();
         let qiblah = Qiblah::new(sydney);
 
         assert_eq!(qiblah.value(), 277.4996044487399);
@@ -91,7 +95,7 @@ mod tests {
 
     #[test]
     fn qiblah_directioon_from_auckland_new_zealand() {
-        let auckland = Coordinates::new(-36.8485, 174.7633);
+        let auckland = Coordinates::new(-36.8485, 174.7633).unwrap();
         let qiblah = Qiblah::new(auckland);
 
         assert_eq!(qiblah.value(), 261.19732640365845);
@@ -99,7 +103,7 @@ mod tests {
 
     #[test]
     fn qiblah_direction_from_london_united_kingdom() {
-        let london = Coordinates::new(51.5074, -0.1278);
+        let london = Coordinates::new(51.5074, -0.1278).unwrap();
         let qiblah = Qiblah::new(london);
 
         assert!((qiblah.value() - 118.9872189).abs() < 1e-7);
@@ -107,7 +111,7 @@ mod tests {
 
     #[test]
     fn qiblah_direction_from_paris_france() {
-        let paris = Coordinates::new(48.8566, 2.3522);
+        let paris = Coordinates::new(48.8566, 2.3522).unwrap();
         let qiblah = Qiblah::new(paris);
 
         assert_eq!(qiblah.value(), 119.16313542183347);
@@ -115,7 +119,7 @@ mod tests {
 
     #[test]
     fn qiblah_direction_from_oslo_norway() {
-        let oslo = Coordinates::new(59.9139, 10.7522);
+        let oslo = Coordinates::new(59.9139, 10.7522).unwrap();
         let qiblah = Qiblah::new(oslo);
 
         assert_eq!(qiblah.value(), 139.02785605537514);
@@ -123,7 +127,7 @@ mod tests {
 
     #[test]
     fn qiblah_direction_from_islamabad_pakistan() {
-        let islamabad = Coordinates::new(33.7294, 73.0931);
+        let islamabad = Coordinates::new(33.7294, 73.0931).unwrap();
         let qiblah = Qiblah::new(islamabad);
 
         assert_eq!(qiblah.value(), 255.8816156785436);
@@ -131,7 +135,7 @@ mod tests {
 
     #[test]
     fn qiblah_direction_from_tokyo_japan() {
-        let tokyo = Coordinates::new(35.6895, 139.6917);
+        let tokyo = Coordinates::new(35.6895, 139.6917).unwrap();
         let qiblah = Qiblah::new(tokyo);
 
         assert_eq!(qiblah.value(), 293.02072441441163);
@@ -139,7 +143,7 @@ mod tests {
 
     #[test]
     fn qiblah_direction_from_jakarta_indonesia() {
-        let jakarta = Coordinates::new(-6.18233995, 106.84287154);
+        let jakarta = Coordinates::new(-6.18233995, 106.84287154).unwrap();
         let qiblah = Qiblah::new(jakarta);
 
         assert!((qiblah.value() - 295.1442983825265).abs() < 1e-7);
@@ -147,7 +151,7 @@ mod tests {
 
     #[test]
     fn qiblah_direction_display() {
-        let nyc = Coordinates::new(40.7128, -74.0059);
+        let nyc = Coordinates::new(40.7128, -74.0059).unwrap();
         let qiblah = Qiblah::new(nyc);
         let actual_value = qiblah.to_string();
 

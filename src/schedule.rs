@@ -13,8 +13,9 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 
 use crate::astronomy::ops;
 use crate::astronomy::solar::SolarTime;
-use crate::astronomy::unit::{Angle, Coordinates, Stride};
+use crate::astronomy::unit::{Angle, Stride};
 use crate::error::Error;
+use crate::models::coordinates::Coordinates;
 use crate::models::method::Method;
 use crate::models::parameters::Parameters;
 use crate::models::prayer::Prayer;
@@ -377,7 +378,7 @@ mod tests {
         let params = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
         PrayerTimes::new(
             date(2015, 7, 12),
-            Coordinates::new(35.7750, -78.6336),
+            Coordinates::new(35.7750, -78.6336).unwrap(),
             params,
         )
         .unwrap()
@@ -404,7 +405,7 @@ mod tests {
         let params = Configuration::with(Method::MoonsightingCommittee, Madhab::Shafi);
         let times = PrayerTimes::new(
             date(2016, 1, 31),
-            Coordinates::new(35.7750, -78.6336),
+            Coordinates::new(35.7750, -78.6336).unwrap(),
             params,
         )
         .unwrap();
@@ -418,8 +419,12 @@ mod tests {
     #[test]
     fn calculate_times_for_moonsighting_method_with_high_latitude() {
         let params = Configuration::with(Method::MoonsightingCommittee, Madhab::Hanafi);
-        let times =
-            PrayerTimes::new(date(2016, 1, 1), Coordinates::new(59.9094, 10.7349), params).unwrap();
+        let times = PrayerTimes::new(
+            date(2016, 1, 1),
+            Coordinates::new(59.9094, 10.7349).unwrap(),
+            params,
+        )
+        .unwrap();
 
         assert_eq!(
             clock(&times),
@@ -436,7 +441,7 @@ mod tests {
 
     #[test]
     fn calculate_times_for_muslim_world_league_with_high_latitude_for_paris_france() {
-        let paris = Coordinates::new(48.8566, 2.3522);
+        let paris = Coordinates::new(48.8566, 2.3522).unwrap();
         let times = PrayerTimes::new(date(2026, 6, 21), paris, seventh_of_the_night()).unwrap();
 
         assert_eq!(
@@ -447,7 +452,7 @@ mod tests {
 
     #[test]
     fn calculate_times_for_muslim_world_league_with_high_latitude_for_brussels_belgium() {
-        let brussels = Coordinates::new(50.85, 4.35);
+        let brussels = Coordinates::new(50.85, 4.35).unwrap();
         let times = PrayerTimes::new(date(2026, 6, 21), brussels, seventh_of_the_night()).unwrap();
 
         assert_eq!(
@@ -461,7 +466,7 @@ mod tests {
         // Isha in Lima on this day is at 23:59:3x UTC, which rounds up to
         // 24:00. It used to fall back to the safe Isha time (05:08 UTC).
         let params = Configuration::with(Method::NorthAmerica, Madhab::Shafi);
-        let lima = Coordinates::new(-12.05, -77.04);
+        let lima = Coordinates::new(-12.05, -77.04).unwrap();
         let times = PrayerTimes::new(date(2026, 4, 19), lima, params).unwrap();
 
         assert_eq!(
@@ -475,7 +480,7 @@ mod tests {
         // Mexico City's sunset on this day is at 23:59:3x UTC, which rounds
         // up to 24:00 and used to panic.
         let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
-        let mexico_city = Coordinates::new(19.43, -99.13);
+        let mexico_city = Coordinates::new(19.43, -99.13).unwrap();
         let times = PrayerTimes::new(date(2026, 11, 8), mexico_city, params).unwrap();
 
         assert_eq!(
@@ -488,7 +493,7 @@ mod tests {
     fn polar_day_and_night_are_errors_not_panics() {
         // Inside the Arctic Circle, issue #20. The next day's sunrise is
         // needed too, so a day before the polar night is an error as well.
-        let arctic = Coordinates::new(69.65, 18.96);
+        let arctic = Coordinates::new(69.65, 18.96).unwrap();
         let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
 
         assert_eq!(

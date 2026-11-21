@@ -10,8 +10,6 @@ use std::ops::{Add, Div, Mul, Sub};
 use crate::astronomy::ops;
 use crate::models::rounding::Rounding;
 use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 pub trait Normalize {
     fn normalized_to_scale(&self, max: f64) -> f64;
@@ -196,34 +194,6 @@ impl Div for Angle {
         Angle {
             degrees: self.degrees / rhs.degrees,
         }
-    }
-}
-
-/// The latitude and longitude associated with a location.
-/// Both latiude and longitude values are specified in degrees.
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(PartialEq, Debug, Copy, Clone)]
-pub struct Coordinates {
-    pub latitude: f64,
-    pub longitude: f64,
-}
-
-impl Coordinates {
-    pub fn new(latitude: f64, longitude: f64) -> Self {
-        Coordinates {
-            latitude: latitude,
-            longitude: longitude,
-        }
-    }
-}
-
-impl Coordinates {
-    pub fn latitude_angle(&self) -> Angle {
-        Angle::new(self.latitude)
-    }
-
-    pub fn longitude_angle(&self) -> Angle {
-        Angle::new(self.longitude)
     }
 }
 

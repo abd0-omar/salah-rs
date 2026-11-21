@@ -7,8 +7,9 @@
 use chrono::{Datelike, NaiveDate};
 
 use crate::astronomy::ops;
-use crate::astronomy::unit::{Angle, Coordinates};
+use crate::astronomy::unit::Angle;
 use crate::error::Error;
+use crate::models::coordinates::Coordinates;
 
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub struct SolarCoordinates {
@@ -198,7 +199,7 @@ mod tests {
     }
 
     fn raleigh() -> Coordinates {
-        Coordinates::new(35.0 + 47.0 / 60.0, -78.0 - 39.0 / 60.0)
+        Coordinates::new(35.0 + 47.0 / 60.0, -78.0 - 39.0 / 60.0).unwrap()
     }
 
     #[test]
@@ -238,7 +239,7 @@ mod tests {
     fn polar_day_and_night_are_errors_not_panics() {
         // Inside the Arctic Circle: midnight sun in June, polar night in
         // December. salah 0.7 unwrapped the missing sunrise (issue #20).
-        let arctic = Coordinates::new(69.65, 18.96);
+        let arctic = Coordinates::new(69.65, 18.96).unwrap();
         let june = NaiveDate::from_ymd_opt(2026, 6, 21).unwrap();
         let december = NaiveDate::from_ymd_opt(2026, 12, 21).unwrap();
 

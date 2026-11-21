@@ -6,8 +6,9 @@
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::astronomy::unit::{Angle, Coordinates};
+use crate::astronomy::unit::Angle;
 use crate::astronomy::unit::{Normalize, Stride};
+use crate::models::coordinates::Coordinates;
 use crate::models::rounding::Rounding;
 use crate::models::shafaq::Shafaq;
 
@@ -592,7 +593,7 @@ mod tests {
 
     #[test]
     fn calculate_altitude_of_celestial_body() {
-        let coordinates = Coordinates::new(35.783333333333331, -78.650000000000006);
+        let coordinates = Coordinates::new(35.783333333333331, -78.650000000000006).unwrap();
         let declination_angle = Angle::new(21.894701414701338);
         let local_hour_angle = Angle::new(108.09275357838322);
         let celestial_body = altitude_of_celestial_body(

@@ -6,7 +6,7 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::astronomy::unit::Coordinates;
+use crate::models::coordinates::Coordinates;
 
 /// Rule for approximating Fajr and Isha at high latitudes
 
@@ -48,10 +48,7 @@ mod tests {
 
     #[test]
     fn recommended_rule_seventh_of_night() {
-        let location = Coordinates {
-            latitude: 48.983226,
-            longitude: -3.216649,
-        };
+        let location = Coordinates::new(48.983226, -3.216649).unwrap();
 
         assert_eq!(
             HighLatitudeRule::recommended(location),
@@ -61,10 +58,7 @@ mod tests {
 
     #[test]
     fn recommended_rule_middle_of_night() {
-        let location = Coordinates {
-            latitude: 45.983226,
-            longitude: -3.216649,
-        };
+        let location = Coordinates::new(45.983226, -3.216649).unwrap();
 
         assert_eq!(
             HighLatitudeRule::recommended(location),

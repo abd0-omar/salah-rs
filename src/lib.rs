@@ -13,7 +13,7 @@
 //! ```
 //! use salah::prelude::*;
 //!
-//! let new_york_city = Coordinates::new(40.7128, -74.0059);
+//! let new_york_city = Coordinates::new(40.7128, -74.0059).expect("valid coordinates");
 //! let date          = NaiveDate::from_ymd_opt(2019, 1, 25).expect("Invalid date provided");
 //! let params        = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
 //! let prayers       = PrayerTimes::new(date, new_york_city, params);
@@ -29,9 +29,10 @@ mod error;
 mod models;
 mod schedule;
 
-pub use crate::astronomy::unit::{Coordinates, Stride};
+pub use crate::astronomy::unit::Stride;
 pub use crate::error::Error;
 pub use crate::models::adjustments::{Adjustment, TimeAdjustment};
+pub use crate::models::coordinates::{Coordinates, CoordinatesError};
 pub use crate::models::high_altitude_rule::HighLatitudeRule;
 pub use crate::models::madhab::Madhab;
 pub use crate::models::method::Method;
@@ -47,11 +48,12 @@ pub mod prelude {
     #[doc(no_inline)]
     pub use crate::astronomy::qiblah::Qiblah;
     #[doc(no_inline)]
-    pub use crate::astronomy::unit::{Coordinates, Stride};
+    pub use crate::astronomy::unit::Stride;
     #[doc(no_inline)]
     pub use crate::error::Error;
     #[doc(no_inline)]
     pub use crate::models::adjustments::{Adjustment, TimeAdjustment};
+    pub use crate::models::coordinates::{Coordinates, CoordinatesError};
     #[doc(no_inline)]
     pub use crate::models::high_altitude_rule::HighLatitudeRule;
     #[doc(no_inline)]
@@ -100,7 +102,7 @@ mod tests {
     fn calculate_prayer_times() {
         let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
         let params = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
-        let coordinates = Coordinates::new(35.7750, -78.6336);
+        let coordinates = Coordinates::new(35.7750, -78.6336).unwrap();
         let times = PrayerTimes::new(date, coordinates, params).unwrap();
 
         assert_eq!(
@@ -115,7 +117,7 @@ mod tests {
         // of the night begins at 05:59Z.
         let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
         let params = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
-        let coordinates = Coordinates::new(35.7750, -78.6336);
+        let coordinates = Coordinates::new(35.7750, -78.6336).unwrap();
         let times = PrayerTimes::new(date, coordinates, params).unwrap();
 
         assert_eq!(
@@ -133,7 +135,7 @@ mod tests {
         let mut params = Configuration::with(Method::Singapore, Madhab::Shafi);
         params.high_latitude_rule = HighLatitudeRule::MiddleOfTheNight;
         let date = NaiveDate::from_ymd_opt(2021, 1, 13).unwrap();
-        let coordinates = Coordinates::new(1.370844612058886, 103.80145644060552);
+        let coordinates = Coordinates::new(1.370844612058886, 103.80145644060552).unwrap();
         let times = PrayerTimes::new(date, coordinates, params).unwrap();
         let sgt = FixedOffset::east_opt(8 * 3600).unwrap();
 
@@ -164,7 +166,7 @@ mod tests {
             .isha(4)
             .done();
         let date = NaiveDate::from_ymd_opt(2021, 1, 12).unwrap();
-        let coordinates = Coordinates::new(-6.18233995, 106.84287154);
+        let coordinates = Coordinates::new(-6.18233995, 106.84287154).unwrap();
         let times = PrayerTimes::new(date, coordinates, params).unwrap();
         let wib = FixedOffset::east_opt(7 * 3600).unwrap();
 
@@ -176,7 +178,7 @@ mod tests {
 
     #[test]
     fn calculate_time_for_kuala_lumpur() {
-        let location = Coordinates::new(3.12, 101.69);
+        let location = Coordinates::new(3.12, 101.69).unwrap();
         let date = NaiveDate::from_ymd_opt(2024, 4, 9).unwrap();
         let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
 
