@@ -28,6 +28,7 @@ mod astronomy;
 mod error;
 mod models;
 mod schedule;
+mod time;
 
 pub use crate::error::Error;
 pub use crate::models::adjustments::{Adjustment, TimeAdjustment};
@@ -130,6 +131,8 @@ mod tests {
         );
     }
 
+    /// Singapore's method rounds up: salah 0.7 rounded to the nearest
+    /// minute first, then added one, so half its times were a minute late.
     #[test]
     fn calculate_times_for_singapore() {
         let mut params = Configuration::with(Method::Singapore, Madhab::Shafi);
@@ -141,7 +144,7 @@ mod tests {
 
         assert_eq!(
             clock(&times, &sgt),
-            ["5:50", "7:13", "13:15", "16:39", "19:16", "20:30"]
+            ["5:50", "7:12", "13:15", "16:39", "19:15", "20:29"]
         );
     }
 

@@ -4,12 +4,9 @@
 // Copyright (c) 2019-2022 Farhan Ahmed. All rights reserved.
 //
 
-use chrono::{DateTime, Duration, Utc};
-
 use crate::astronomy::unit::Angle;
-use crate::astronomy::unit::{Normalize, Stride};
+use crate::astronomy::unit::Normalize;
 use crate::models::coordinates::Coordinates;
-use crate::models::rounding::Rounding;
 use crate::models::shafaq::Shafaq;
 
 // The geometric mean longitude of the sun.
@@ -317,22 +314,20 @@ pub fn is_leap_year(year: u32) -> bool {
     true
 }
 
-// Twilight adjustment based on observational data for use
-// in the Moonsighting Committee calculation method.
-pub fn season_adjusted_morning_twilight(
-    latitude: f64,
-    day: u32,
-    year: u32,
-    sunrise: DateTime<Utc>,
-) -> DateTime<Utc> {
+// Round half up, as JavaScript's Math.round: Adhan's rounding, which
+// f64::round (half away from zero) differs from on negative halves.
+fn round_half_up(value: f64) -> i64 {
+    (value + 0.5).floor() as i64
+}
+
+// Seconds from sunrise to the start of the Moonsighting Committee's morning
+// twilight (negative: before sunrise), from observational data.
+pub fn season_adjusted_morning_twilight(latitude: f64, day: u32, year: u32) -> i64 {
     let dyy = days_since_solstice(day, year, latitude) as f64;
     let adjustment =
         twilight_adjustments(AdjustmentDaytime::Morning, latitude, dyy, Shafaq::General);
 
-    let rounded_adjustment = (adjustment * -60.0).round() as i64;
-    sunrise
-        .checked_add_signed(Duration::seconds(rounded_adjustment))
-        .unwrap()
+    round_half_up(adjustment * -60.0)
 }
 
 fn twilight_adjustments(
@@ -408,24 +403,13 @@ fn twilight_adjustment_values(
     }
 }
 
-// Twilight adjustment based on observational data for use
-// in the Moonsighting Committee calculation method.
-pub fn season_adjusted_evening_twilight(
-    latitude: f64,
-    day: u32,
-    year: u32,
-    sunset: DateTime<Utc>,
-    shafaq: Shafaq,
-) -> DateTime<Utc> {
+// Seconds from sunset to the end of the Moonsighting Committee's evening
+// twilight, from observational data.
+pub fn season_adjusted_evening_twilight(latitude: f64, day: u32, year: u32, shafaq: Shafaq) -> i64 {
     let dyy = days_since_solstice(day, year, latitude) as f64;
     let adjustment = twilight_adjustments(AdjustmentDaytime::Evening, latitude, dyy, shafaq);
 
-    let rounded_adjustment = (adjustment * 60.0).round() as i64;
-    let adjusted_date = sunset
-        .checked_add_signed(Duration::seconds(rounded_adjustment))
-        .unwrap();
-
-    adjusted_date.rounded_minute(Rounding::Nearest)
+    round_half_up(adjustment * 60.0)
 }
 
 // Solstice calculation to determine a date's seasonal progression.
@@ -446,11 +430,6 @@ pub fn days_since_solstice(day_of_year: u32, year: u32, latitude: f64) -> u32 {
         let southern_offset = if is_leap_year(year) { 173 } else { 172 };
         (day_of_year - southern_offset) + days_in_year
     }
-}
-
-pub fn adjust_time(date: &DateTime<Utc>, minutes: i64) -> DateTime<Utc> {
-    date.checked_add_signed(Duration::seconds(minutes * 60))
-        .unwrap()
 }
 
 #[cfg(test)]

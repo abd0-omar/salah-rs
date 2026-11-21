@@ -9,17 +9,24 @@
 //! This module provides the main objects that are used for calculating
 //! the prayer times.
 
-use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 
 use crate::astronomy::ops;
 use crate::astronomy::solar::SolarTime;
-use crate::astronomy::unit::{Angle, Stride};
+use crate::astronomy::unit::Angle;
 use crate::error::Error;
 use crate::models::coordinates::Coordinates;
 use crate::models::method::Method;
 use crate::models::parameters::{Isha, Parameters};
 use crate::models::prayer::Prayer;
-use crate::models::rounding::Rounding;
+use crate::time::Moment;
+
+/// The first date prayer times are calculated for.
+pub const FIRST_DATE: NaiveDate = NaiveDate::from_ymd_opt(1000, 1, 1).unwrap();
+/// The last date prayer times are calculated for. The astronomical series
+/// are Meeus's, made for the centuries around 2000; the bounds keep every
+/// date and time far from chrono's limits.
+pub const LAST_DATE: NaiveDate = NaiveDate::from_ymd_opt(3000, 12, 31).unwrap();
 
 /// A data struct to hold the timing for all
 /// prayers.
@@ -35,53 +42,150 @@ pub struct PrayerTimes {
     qiyam: DateTime<Utc>,
     fajr_tomorrow: DateTime<Utc>,
     coordinates: Coordinates,
-    date: DateTime<Utc>,
+    date: NaiveDate,
     parameters: Parameters,
 }
 
-/// `hours` after `date`'s 00:00 UTC, to the nearest minute. Counted from
-/// midnight, so a time that rounds up to 24:00 is the next day's 00:00.
-fn at_hours(date: NaiveDate, hours: f64) -> DateTime<Utc> {
-    let seconds = (hours * 60.0 * 60.0).floor() as i64;
-    let rounded_minutes = (seconds + 30).div_euclid(60);
-    date.and_time(chrono::NaiveTime::MIN).and_utc() + Duration::minutes(rounded_minutes)
-}
-
-/// The sun's day as times.
+/// The sun's day on a date, to the second.
 #[derive(Debug, Copy, Clone)]
 struct SolarDay {
     date: NaiveDate,
     solar: SolarTime,
-    transit: DateTime<Utc>,
-    sunrise: DateTime<Utc>,
-    sunset: DateTime<Utc>,
+    transit: Moment,
+    sunrise: Moment,
+    sunset: Moment,
 }
 
 impl SolarDay {
     fn new(date: NaiveDate, coordinates: Coordinates) -> Result<SolarDay, Error> {
         let solar = SolarTime::new(date, coordinates)?;
-        Ok(SolarDay {
-            date,
-            solar,
-            transit: at_hours(date, solar.transit),
-            sunrise: at_hours(date, solar.sunrise),
-            sunset: at_hours(date, solar.sunset),
-        })
+        let at = |hours| Moment::at_hours(date, hours);
+        match (at(solar.transit), at(solar.sunrise), at(solar.sunset)) {
+            (Some(transit), Some(sunrise), Some(sunset)) => Ok(SolarDay {
+                date,
+                solar,
+                transit,
+                sunrise,
+                sunset,
+            }),
+            // SolarTime's hours are within a day of the date.
+            _ => Err(Error::DateOutOfRange(date)),
+        }
     }
 
-    fn time_for_solar_angle(&self, angle: Angle, after_transit: bool) -> Option<DateTime<Utc>> {
-        self.solar
-            .time_for_solar_angle(angle, after_transit)
-            .map(|hours| at_hours(self.date, hours))
+    /// When the sun is `depression` degrees below the horizon, before or
+    /// after transit.
+    fn below_horizon(&self, depression: f64, after_transit: bool) -> Option<Moment> {
+        let hours = self
+            .solar
+            .time_for_solar_angle(Angle::new(-depression), after_transit)?;
+        Moment::at_hours(self.date, hours)
+    }
+
+    fn afternoon(&self, shadow_length: f64) -> Option<Moment> {
+        Moment::at_hours(self.date, self.solar.afternoon(shadow_length)?)
     }
 }
 
-/// The first date prayer times are calculated for.
-pub const FIRST_DATE: NaiveDate = NaiveDate::from_ymd_opt(1000, 1, 1).unwrap();
-/// The last date prayer times are calculated for. The astronomical series
-/// are Meeus's, made for the centuries around 2000; the bounds keep every
-/// date and time far from chrono's limits.
-pub const LAST_DATE: NaiveDate = NaiveDate::from_ymd_opt(3000, 12, 31).unwrap();
+/// A day's six times, before adjustments and rounding.
+#[derive(Debug, Copy, Clone)]
+struct Day {
+    fajr: Moment,
+    sunrise: Moment,
+    dhuhr: Moment,
+    asr: Moment,
+    maghrib: Moment,
+    isha: Moment,
+}
+
+impl Day {
+    /// The times of the solar day of `date`, which take the next day's
+    /// sunrise for the length of the night.
+    fn new(
+        date: NaiveDate,
+        coordinates: Coordinates,
+        parameters: &Parameters,
+    ) -> Result<Day, Error> {
+        let today = SolarDay::new(date, coordinates)?;
+        let tomorrow = SolarDay::new(next_day(date)?, coordinates)?;
+        let night = tomorrow.sunrise.since(today.sunset) as f64;
+        let moonsighting = parameters.method == Method::MoonsightingCommittee;
+        let moonsighting_high = moonsighting && coordinates.latitude >= 55.0;
+
+        let safe_fajr = if moonsighting {
+            today.sunrise.plus(ops::season_adjusted_morning_twilight(
+                coordinates.latitude,
+                date.ordinal(),
+                date.year() as u32,
+            ))
+        } else {
+            today
+                .sunrise
+                .plus_fraction(-parameters.night_portion(parameters.fajr_angle) * night)
+        };
+        let fajr = if moonsighting_high {
+            Some(today.sunrise.plus_fraction(-night / 7.0))
+        } else {
+            today.below_horizon(parameters.fajr_angle.degrees(), false)
+        };
+        let fajr = fajr.map_or(safe_fajr, |fajr| fajr.max(safe_fajr));
+
+        let isha = match parameters.isha {
+            Isha::Interval(minutes) => today.sunset.plus_minutes(minutes.into()),
+            Isha::Angle(angle) => {
+                let safe_isha = if moonsighting {
+                    today.sunset.plus(ops::season_adjusted_evening_twilight(
+                        coordinates.latitude,
+                        date.ordinal(),
+                        date.year() as u32,
+                        parameters.shafaq,
+                    ))
+                } else {
+                    today
+                        .sunset
+                        .plus_fraction(parameters.night_portion(angle) * night)
+                };
+                let isha = if moonsighting_high {
+                    Some(today.sunset.plus_fraction(night / 7.0))
+                } else {
+                    today.below_horizon(angle.degrees(), true)
+                };
+                isha.map_or(safe_isha, |isha| isha.min(safe_isha))
+            }
+        };
+
+        Ok(Day {
+            fajr,
+            sunrise: today.sunrise,
+            dhuhr: today.transit,
+            asr: today
+                .afternoon(parameters.madhab.shadow().into())
+                .unwrap_or(today.transit),
+            maghrib: today.sunset,
+            isha,
+        })
+    }
+
+    /// With the adjustments added and rounded.
+    fn adjusted(self, parameters: &Parameters) -> Day {
+        let adjust = |time: Moment, prayer| {
+            time.plus_minutes(parameters.time_adjustments(prayer))
+                .rounded(parameters.rounding)
+        };
+        Day {
+            fajr: adjust(self.fajr, Prayer::Fajr),
+            sunrise: adjust(self.sunrise, Prayer::Sunrise),
+            dhuhr: adjust(self.dhuhr, Prayer::Dhuhr),
+            asr: adjust(self.asr, Prayer::Asr),
+            maghrib: adjust(self.maghrib, Prayer::Maghrib),
+            isha: adjust(self.isha, Prayer::Isha),
+        }
+    }
+}
+
+fn next_day(date: NaiveDate) -> Result<NaiveDate, Error> {
+    date.succ_opt().ok_or(Error::DateOutOfRange(date))
+}
 
 impl PrayerTimes {
     /// The prayer times of the solar day of the UTC date `date`, or why
@@ -94,65 +198,37 @@ impl PrayerTimes {
         if !(FIRST_DATE..=LAST_DATE).contains(&date) {
             return Err(Error::DateOutOfRange(date));
         }
-        let prayer_date = date.and_time(chrono::NaiveTime::MIN).and_utc();
-        let tomorrow = prayer_date.tomorrow();
-        let solar_time = SolarDay::new(date, coordinates)?;
-        let solar_time_tomorrow = SolarDay::new(tomorrow.date_naive(), coordinates)?;
+        let day = Day::new(date, coordinates, &parameters)?.adjusted(&parameters);
+        // The next day's Fajr, as that day's own times have it.
+        let fajr_tomorrow = Day::new(next_day(date)?, coordinates, &parameters)?
+            .adjusted(&parameters)
+            .fajr;
 
-        let asr = solar_time
-            .solar
-            .afternoon(parameters.madhab.shadow().into())
-            .map(|hours| at_hours(date, hours))
-            .unwrap_or(solar_time.transit);
-        let night = solar_time_tomorrow
-            .sunrise
-            .signed_duration_since(solar_time.sunset);
+        // The night from Maghrib to the next Fajr: its middle and the start
+        // of its last third (Adhan's SunnahTimes).
+        let night = fajr_tomorrow.since(day.maghrib) as f64;
+        let middle_of_the_night = day
+            .maghrib
+            .plus((night / 2.0) as i64)
+            .rounded(parameters.rounding);
+        let qiyam = day
+            .maghrib
+            .plus((night * (2.0 / 3.0)) as i64)
+            .rounded(parameters.rounding);
 
-        let final_fajr =
-            PrayerTimes::calculate_fajr(parameters, solar_time, night, coordinates, prayer_date)
-                .rounded_minute(parameters.rounding);
-        let final_sunrise = solar_time
-            .sunrise
-            .adjust_time(i64::from(parameters.time_adjustments(Prayer::Sunrise)))
-            .rounded_minute(parameters.rounding);
-        let final_dhuhr = solar_time
-            .transit
-            .adjust_time(i64::from(parameters.time_adjustments(Prayer::Dhuhr)))
-            .rounded_minute(parameters.rounding);
-        let final_asr = asr
-            .adjust_time(i64::from(parameters.time_adjustments(Prayer::Asr)))
-            .rounded_minute(parameters.rounding);
-        let final_maghrib = ops::adjust_time(
-            &solar_time.sunset,
-            i64::from(parameters.time_adjustments(Prayer::Maghrib)),
-        )
-        .rounded_minute(parameters.rounding);
-        let final_isha =
-            PrayerTimes::calculate_isha(parameters, solar_time, night, coordinates, prayer_date)
-                .rounded_minute(parameters.rounding);
-
-        // Calculate the middle of the night and qiyam times
-        let (final_middle_of_night, final_qiyam, final_fajr_tomorrow) =
-            PrayerTimes::calculate_qiyam(
-                final_maghrib,
-                parameters,
-                solar_time_tomorrow,
-                coordinates,
-                tomorrow,
-            )?;
-
+        let utc = |time: Moment| time.utc().ok_or(Error::DateOutOfRange(date));
         Ok(PrayerTimes {
-            fajr: final_fajr,
-            sunrise: final_sunrise,
-            dhuhr: final_dhuhr,
-            asr: final_asr,
-            maghrib: final_maghrib,
-            isha: final_isha,
-            middle_of_the_night: final_middle_of_night,
-            qiyam: final_qiyam,
-            fajr_tomorrow: final_fajr_tomorrow,
+            fajr: utc(day.fajr)?,
+            sunrise: utc(day.sunrise)?,
+            dhuhr: utc(day.dhuhr)?,
+            asr: utc(day.asr)?,
+            maghrib: utc(day.maghrib)?,
+            isha: utc(day.isha)?,
+            middle_of_the_night: utc(middle_of_the_night)?,
+            qiyam: utc(qiyam)?,
+            fajr_tomorrow: utc(fajr_tomorrow)?,
             coordinates,
-            date: prayer_date,
+            date,
             parameters,
         })
     }
@@ -200,158 +276,18 @@ impl PrayerTimes {
     }
 
     fn current_time(&self, time: DateTime<Utc>) -> Option<Prayer> {
-        let current_prayer: Option<Prayer>;
-
-        if self.fajr_tomorrow.signed_duration_since(time).num_seconds() <= 0 {
-            current_prayer = Some(Prayer::FajrTomorrow)
-        } else if self.qiyam.signed_duration_since(time).num_seconds() <= 0 {
-            current_prayer = Some(Prayer::Qiyam)
-        } else if self.isha.signed_duration_since(time).num_seconds() <= 0 {
-            current_prayer = Some(Prayer::Isha);
-        } else if self.maghrib.signed_duration_since(time).num_seconds() <= 0 {
-            current_prayer = Some(Prayer::Maghrib);
-        } else if self.asr.signed_duration_since(time).num_seconds() <= 0 {
-            current_prayer = Some(Prayer::Asr);
-        } else if self.dhuhr.signed_duration_since(time).num_seconds() <= 0 {
-            current_prayer = Some(Prayer::Dhuhr);
-        } else if self.sunrise.signed_duration_since(time).num_seconds() <= 0 {
-            current_prayer = Some(Prayer::Sunrise);
-        } else if self.fajr.signed_duration_since(time).num_seconds() <= 0 {
-            current_prayer = Some(Prayer::Fajr);
-        } else {
-            current_prayer = None;
-        }
-
-        current_prayer
-    }
-
-    fn calculate_fajr(
-        parameters: Parameters,
-        solar_time: SolarDay,
-        night: Duration,
-        coordinates: Coordinates,
-        prayer_date: DateTime<Utc>,
-    ) -> DateTime<Utc> {
-        let safe_fajr = if parameters.method == Method::MoonsightingCommittee {
-            let day_of_year = prayer_date.ordinal();
-            ops::season_adjusted_morning_twilight(
-                coordinates.latitude,
-                day_of_year,
-                prayer_date.year() as u32,
-                solar_time.sunrise,
-            )
-        } else {
-            let portion = parameters.night_portion(parameters.fajr_angle);
-            let night_fraction = portion * (night.num_seconds() as f64);
-
-            solar_time
-                .sunrise
-                .checked_add_signed(Duration::seconds(-night_fraction as i64))
-                .unwrap()
-        };
-
-        let mut fajr = solar_time
-            .time_for_solar_angle(Angle::new(-parameters.fajr_angle.degrees()), false)
-            .unwrap_or(safe_fajr);
-
-        // special case for moonsighting committee above latitude 55
-        if parameters.method == Method::MoonsightingCommittee && coordinates.latitude >= 55.0 {
-            let night_fraction = night.num_seconds() / 7;
-            fajr = solar_time
-                .sunrise
-                .checked_add_signed(Duration::seconds(-night_fraction))
-                .unwrap();
-        }
-
-        if fajr < safe_fajr {
-            fajr = safe_fajr;
-        }
-
-        fajr.adjust_time(i64::from(parameters.time_adjustments(Prayer::Fajr)))
-    }
-
-    fn calculate_isha(
-        parameters: Parameters,
-        solar_time: SolarDay,
-        night: Duration,
-        coordinates: Coordinates,
-        prayer_date: DateTime<Utc>,
-    ) -> DateTime<Utc> {
-        let isha = match parameters.isha {
-            Isha::Interval(minutes) => solar_time.sunset + Duration::minutes(minutes.into()),
-            Isha::Angle(angle) => {
-                let safe_isha = if parameters.method == Method::MoonsightingCommittee {
-                    let day_of_year = prayer_date.ordinal();
-
-                    ops::season_adjusted_evening_twilight(
-                        coordinates.latitude,
-                        day_of_year,
-                        prayer_date.year() as u32,
-                        solar_time.sunset,
-                        parameters.shafaq,
-                    )
-                } else {
-                    let portion = parameters.night_portion(angle);
-                    let night_fraction = portion * (night.num_seconds() as f64);
-
-                    solar_time
-                        .sunset
-                        .checked_add_signed(Duration::seconds(night_fraction as i64))
-                        .unwrap()
-                };
-
-                let mut isha = solar_time
-                    .time_for_solar_angle(Angle::new(-angle.degrees()), true)
-                    .unwrap_or(safe_isha);
-
-                // special case for moonsighting committee above latitude 55
-                if parameters.method == Method::MoonsightingCommittee
-                    && coordinates.latitude >= 55.0
-                {
-                    let night_fraction = night.num_seconds() / 7;
-                    isha = solar_time
-                        .sunset
-                        .checked_add_signed(Duration::seconds(night_fraction))
-                        .unwrap();
-                }
-
-                isha.min(safe_isha)
-            }
-        };
-
-        isha.adjust_time(i64::from(parameters.time_adjustments(Prayer::Isha)))
-    }
-
-    fn calculate_qiyam(
-        current_maghrib: DateTime<Utc>,
-        parameters: Parameters,
-        solar_time: SolarDay,
-        coordinates: Coordinates,
-        prayer_date: DateTime<Utc>,
-    ) -> Result<(DateTime<Utc>, DateTime<Utc>, DateTime<Utc>), Error> {
-        let tomorrow = prayer_date.tomorrow();
-        let solar_time_tomorrow = SolarDay::new(tomorrow.date_naive(), coordinates)?;
-        let night = solar_time_tomorrow
-            .sunrise
-            .signed_duration_since(solar_time.sunset);
-
-        let tomorrow_fajr =
-            PrayerTimes::calculate_fajr(parameters, solar_time, night, coordinates, prayer_date);
-        let night_duration = tomorrow_fajr
-            .signed_duration_since(current_maghrib)
-            .num_seconds() as f64;
-        let middle_night_portion = (night_duration / 2.0) as i64;
-        let last_third_portion = (night_duration * (2.0 / 3.0)) as i64;
-        let middle_of_night = current_maghrib
-            .checked_add_signed(Duration::seconds(middle_night_portion))
-            .unwrap()
-            .rounded_minute(Rounding::Nearest);
-        let last_third_of_night = current_maghrib
-            .checked_add_signed(Duration::seconds(last_third_portion))
-            .unwrap()
-            .rounded_minute(Rounding::Nearest);
-
-        Ok((middle_of_night, last_third_of_night, tomorrow_fajr))
+        [
+            Prayer::FajrTomorrow,
+            Prayer::Qiyam,
+            Prayer::Isha,
+            Prayer::Maghrib,
+            Prayer::Asr,
+            Prayer::Dhuhr,
+            Prayer::Sunrise,
+            Prayer::Fajr,
+        ]
+        .into_iter()
+        .find(|&prayer| self.time(prayer) <= time)
     }
 }
 
@@ -361,6 +297,7 @@ mod tests {
     use crate::Configuration;
     use crate::models::high_altitude_rule::HighLatitudeRule;
     use crate::models::madhab::Madhab;
+    use crate::models::rounding::Rounding;
     use chrono::{NaiveDate, TimeZone, Utc};
 
     fn date(year: i32, month: u32, day: u32) -> NaiveDate {
@@ -493,6 +430,41 @@ mod tests {
             times.time(Prayer::Maghrib),
             Utc.with_ymd_and_hms(2026, 11, 9, 0, 0, 0).unwrap()
         );
+    }
+
+    #[test]
+    fn tomorrows_fajr_is_the_next_days_fajr() {
+        // salah 0.7 left it unrounded, seconds and all, unlike the next
+        // day's own Fajr, and counted the last third of the night from it.
+        let params = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
+        let place = Coordinates::new(35.7750, -78.6336).unwrap();
+        for day in 1..=27 {
+            let today = PrayerTimes::new(date(2026, 2, day), place, params).unwrap();
+            let tomorrow = PrayerTimes::new(date(2026, 2, day + 1), place, params).unwrap();
+            assert_eq!(
+                today.time(Prayer::FajrTomorrow),
+                tomorrow.time(Prayer::Fajr)
+            );
+        }
+    }
+
+    #[test]
+    fn no_rounding_keeps_the_seconds() {
+        // salah 0.7 rounded every time to the minute before Rounding was
+        // applied, so Rounding::None changed nothing.
+        let mut params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
+        params.rounding = Rounding::None;
+        let place = Coordinates::new(35.7750, -78.6336).unwrap();
+        let times = PrayerTimes::new(date(2026, 2, 1), place, params).unwrap();
+        let seconds = [
+            Prayer::Fajr,
+            Prayer::Sunrise,
+            Prayer::Dhuhr,
+            Prayer::Asr,
+            Prayer::Maghrib,
+        ]
+        .map(|p| chrono::Timelike::second(&times.time(p)));
+        assert_ne!(seconds, [0; 5]);
     }
 
     #[test]

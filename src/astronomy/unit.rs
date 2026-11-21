@@ -7,9 +7,6 @@
 use std::f64::consts::PI;
 use std::ops::{Add, Div, Mul, Sub};
 
-use crate::models::rounding::Rounding;
-use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike};
-
 pub trait Normalize {
     fn normalized_to_scale(&self, max: f64) -> f64;
 }
@@ -17,79 +14,6 @@ pub trait Normalize {
 impl Normalize for f64 {
     fn normalized_to_scale(&self, max: f64) -> f64 {
         self - (max * (self / max).floor())
-    }
-}
-
-/// Convenience methods for the DateTime type.
-pub(crate) trait Stride {
-    fn tomorrow(&self) -> Self;
-    fn adjust_time(&self, minutes: i64) -> Self;
-    fn next_date(&self, fwd: bool) -> Self;
-    fn rounded_minute(&self, rounding: Rounding) -> Self;
-}
-
-impl<Tz: TimeZone> Stride for DateTime<Tz> {
-    /// Returns the date/time for tomorrow.
-    fn tomorrow(&self) -> Self {
-        self.next_date(true)
-    }
-
-    fn rounded_minute(&self, rounding: Rounding) -> Self {
-        let adjusted = self.clone();
-        let seconds = adjusted.second();
-
-        match rounding {
-            Rounding::Nearest => {
-                let rounded = ((seconds as f64) / 60.0).round() as i64;
-                let adjusted_seconds = seconds as i64;
-
-                if rounded == 1 {
-                    adjusted + Duration::seconds(60 - adjusted_seconds)
-                } else {
-                    adjusted + Duration::seconds(adjusted_seconds * -1)
-                }
-            }
-            Rounding::Up => {
-                let adjusted_seconds = seconds as i64;
-
-                adjusted + Duration::seconds(60 - adjusted_seconds)
-            }
-            Rounding::None => adjusted,
-        }
-    }
-
-    fn adjust_time(&self, minutes: i64) -> Self {
-        let some_date = self.clone();
-        some_date
-            .checked_add_signed(Duration::seconds(minutes * 60))
-            .unwrap()
-    }
-
-    fn next_date(&self, fwd: bool) -> Self {
-        let ordinal = if fwd {
-            self.ordinal() + 1
-        } else {
-            self.ordinal() - 1
-        };
-
-        match self.with_ordinal(ordinal) {
-            Some(dt) => dt,
-            None => {
-                if fwd {
-                    self.with_year(self.year() + 1)
-                        .unwrap()
-                        .with_ordinal(1)
-                        .unwrap()
-                } else {
-                    self.with_year(self.year() - 1)
-                        .unwrap()
-                        .with_month(12)
-                        .unwrap()
-                        .with_day(31)
-                        .unwrap()
-                }
-            }
-        }
     }
 }
 
@@ -182,7 +106,6 @@ impl Div for Angle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use std::f64::consts::PI;
 
     #[test]
@@ -241,50 +164,5 @@ mod tests {
         let angle_b = Angle::new(45.0);
 
         assert_eq!((angle_a + angle_b).degrees, 90.0);
-    }
-
-    #[test]
-    fn calculate_rounding_nearest() {
-        let time_1 = Utc
-            .with_ymd_and_hms(2015, 7, 13, 4, 37, 30)
-            .single()
-            .expect("Invalid date and time.");
-
-        assert_eq!(
-            time_1.rounded_minute(Rounding::Nearest),
-            Utc.with_ymd_and_hms(2015, 7, 13, 4, 38, 00)
-                .single()
-                .unwrap()
-        );
-    }
-
-    #[test]
-    fn calculate_rounding_up() {
-        let time_1 = Utc
-            .with_ymd_and_hms(2015, 07, 13, 05, 59, 20)
-            .single()
-            .expect("Invalid date and time.");
-
-        assert_eq!(
-            time_1.rounded_minute(Rounding::Up),
-            Utc.with_ymd_and_hms(2015, 7, 13, 6, 00, 00)
-                .single()
-                .unwrap()
-        );
-    }
-
-    #[test]
-    fn calculate_rounding_none() {
-        let time_1 = Utc
-            .with_ymd_and_hms(2015, 07, 13, 05, 59, 20)
-            .single()
-            .expect("Invalid date and time.");
-
-        assert_eq!(
-            time_1.rounded_minute(Rounding::None),
-            Utc.with_ymd_and_hms(2015, 7, 13, 5, 59, 20)
-                .single()
-                .unwrap()
-        );
     }
 }
