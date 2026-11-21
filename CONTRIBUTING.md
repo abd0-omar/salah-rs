@@ -27,11 +27,8 @@ First Time Setup
 
 Best way to have a local Rust development environment set up is by using [rustup](https://www.rust-lang.org/tools/install).
 
-There are two direct dependencies for this crate:
-- [chrono](https://docs.rs/crate/chrono/0.4.6)
-- [Spectral](https://docs.rs/spectral/0.6.0/spectral/) (needed only for running tests.)
-
-These would be installed when you run `cargo build` (or `cargo test`).
+The crate's dependencies are installed when you run `cargo build` (or
+`cargo test`).
 
 Start coding
 ------------

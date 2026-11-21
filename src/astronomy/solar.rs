@@ -291,11 +291,11 @@ mod tests {
 
     #[test]
     fn calculate_julian_date() {
-        let local = Local
+        // In UTC: a local midnight is the day before in UTC east of Greenwich.
+        let utc = Utc
             .with_ymd_and_hms(1992, 10, 13, 0, 0, 0)
             .single()
             .expect("Invalid data and time provided");
-        let utc = local.with_timezone(&Utc);
         let julian_day = ops::julian_day(1992, 10, 13, 0.0);
 
         assert_eq!(utc.julian_day(), julian_day);

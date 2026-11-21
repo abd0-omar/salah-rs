@@ -48,14 +48,13 @@ impl fmt::Display for Qiblah {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use spectral::prelude::*;
 
     #[test]
     fn qiblah_direction_from_nyc_in_north_america() {
         let nyc = Coordinates::new(40.7128, -74.0059);
         let qiblah = Qiblah::new(nyc);
 
-        assert_that!(qiblah.value()).is_close_to(58.4817635, 0.0000001f64);
+        assert!((qiblah.value() - 58.4817635).abs() < 1e-7);
     }
 
     #[test]
@@ -103,7 +102,7 @@ mod tests {
         let london = Coordinates::new(51.5074, -0.1278);
         let qiblah = Qiblah::new(london);
 
-        assert_that!(qiblah.value()).is_close_to(118.9872189, 0.0000001f64);
+        assert!((qiblah.value() - 118.9872189).abs() < 1e-7);
     }
 
     #[test]
@@ -143,7 +142,7 @@ mod tests {
         let jakarta = Coordinates::new(-6.18233995, 106.84287154);
         let qiblah = Qiblah::new(jakarta);
 
-        assert_that!(qiblah.value()).is_close_to(295.1442983825265, 0.0000001f64);
+        assert!((qiblah.value() - 295.1442983825265).abs() < 1e-7);
     }
 
     #[test]

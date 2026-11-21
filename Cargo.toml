@@ -1,19 +1,18 @@
 [package]
 name = "salah"
 version = "0.7.6"
-authors = ["Farhan Ahmed <farhan@themacronaut.com>"]
+authors = ["Farhan Ahmed <farhan@themacronaut.com>", "salah-rs contributors"]
 edition = "2024"
 description = "Islamic prayer time library for Rust"
-documentation = "https://docs.rs/salah/"
-homepage = "https://codeberg.org/macronaut/salah"
-repository = "https://codeberg.org/macronaut/salah"
+homepage = "https://github.com/sharno/salah-rs"
+repository = "https://github.com/sharno/salah-rs"
 readme = "README.md"
 keywords = ["salah", "pray", "islam", "reminder", "adhan"]
 categories = ["date-and-time"]
 license = "MIT"
-
-[dev-dependencies]
-spectral = "0.6.0"
+# A fork of insha/salah: not on crates.io, so it can't be mistaken for the
+# original there. Depend on it by git or as a vendored subtree.
+publish = false
 
 [dependencies]
 chrono = "0.4.42"

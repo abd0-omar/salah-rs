@@ -1,13 +1,38 @@
-# Salah
+# Salah (salah-rs fork)
 
-![Build Status](https://github.com/insha/salah/actions/workflows/rust.yml/badge.svg)
-[![Crate.io][cratesio-image]][cratesio]
-[![Docs][docsrs-image]][docsrs]
+[![CI](https://github.com/sharno/salah-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/sharno/salah-rs/actions/workflows/ci.yml)
 
-[cratesio-image]: https://img.shields.io/crates/v/salah.svg
-[cratesio]: https://crates.io/crates/salah
-[docsrs-image]: https://docs.rs/mio/badge.svg
-[docsrs]: https://docs.rs/salah/
+Islamic prayer times for Rust: a maintained fork of
+[insha/salah](https://github.com/insha/salah) (MIT, by Farhan Ahmed), itself a
+port of [Adhan](https://github.com/batoulapps/Adhan).
+
+## Why this fork
+
+salah 0.7 panics on ordinary inputs: where the sun never reaches a twilight
+angle (most of Europe around the June solstice), where it never rises or sets
+(past the polar circles), on any time that rounds up to 24:00 UTC, on
+`current()` for any day but today. This fork keeps salah's calculations and
+attribution, and changes:
+
+- **Total API.** No input panics: every constructor and calculation returns
+  `Result` with a typed `Error`, coordinates and parameters are validated
+  types, and nothing reads the clock behind your back.
+- **Every known bug fixed**, each with a regression test (see the git log and
+  the list below).
+- **Verified.** Kani proofs that the public API can't panic and that its
+  results keep their invariants, property tests, and a differential test
+  against Adhan; see [VERIFICATION.md](VERIFICATION.md).
+
+It is not published to crates.io (the name `salah` there is the original).
+Use it from git:
+
+```toml
+[dependencies]
+salah = { git = "https://github.com/sharno/salah-rs" }
+```
+
+This fork is maintained with the help of an AI coding assistant; every change
+carries a test, and the proofs and checks in CI gate each commit.
 
 ## Usage
 
