@@ -9,7 +9,7 @@
 //! This module provides the main objects that are used for calculating
 //! the prayer times.
 
-use chrono::{DateTime, Datelike, NaiveDate, TimeDelta, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, TimeDelta, TimeZone, Utc};
 
 use crate::astronomy::ops;
 use crate::astronomy::solar::SolarTime;
@@ -350,6 +350,33 @@ impl PrayerTimes {
             date,
             parameters,
         })
+    }
+
+    /// The prayer times of the local calendar day `date` in `zone`: those
+    /// of the solar day whose Dhuhr falls on `date` there.
+    ///
+    /// [`new`](Self::new) takes the solar day of a UTC date, whose noon is
+    /// at about 12:00 local mean time on it. That is the local date's only
+    /// where the zone keeps near its meridian: Kiritimati keeps UTC+14 at
+    /// 157°W, so the solar day of a UTC date has its noon on the next day
+    /// there.
+    pub fn on_local_date<Tz: TimeZone>(
+        date: NaiveDate,
+        zone: &Tz,
+        coordinates: Coordinates,
+        parameters: Parameters,
+    ) -> Result<PrayerTimes, Error> {
+        let times = PrayerTimes::new(date, coordinates, parameters)?;
+        let noon = times.dhuhr.with_timezone(zone).date_naive();
+        match noon == date {
+            true => Ok(times),
+            false => {
+                let solar_date = date
+                    .checked_add_signed(date - noon)
+                    .ok_or(Error::DateOutOfRange(date))?;
+                PrayerTimes::new(solar_date, coordinates, parameters)
+            }
+        }
     }
 
     pub fn time(&self, prayer: Prayer) -> DateTime<Utc> {
@@ -746,6 +773,30 @@ mod tests {
         );
         // Fajr and sunrise on the evening before, UTC.
         assert_eq!(june.time(Prayer::Fajr).date_naive(), date(2026, 6, 20));
+    }
+
+    #[test]
+    fn times_of_a_local_date_far_from_the_zones_meridian() {
+        // Kiritimati keeps UTC+14 at 157°W: the solar day of a UTC date has
+        // its Dhuhr on the next local date there.
+        let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
+        let kiritimati = Coordinates::new(1.87, -157.40).unwrap();
+        let zone = chrono::FixedOffset::east_opt(14 * 3600).unwrap();
+        let day = date(2026, 3, 10);
+        let local =
+            |times: &PrayerTimes| times.time(Prayer::Dhuhr).with_timezone(&zone).date_naive();
+
+        let utc_day = PrayerTimes::new(day, kiritimati, params).unwrap();
+        assert_eq!(local(&utc_day), date(2026, 3, 11));
+        let local_day = PrayerTimes::on_local_date(day, &zone, kiritimati, params).unwrap();
+        assert_eq!(local(&local_day), day);
+        // Where the zone fits its meridian, it is the UTC date's.
+        let mecca = Coordinates::new(21.4225, 39.8262).unwrap();
+        let riyadh = chrono::FixedOffset::east_opt(3 * 3600).unwrap();
+        assert_eq!(
+            PrayerTimes::on_local_date(day, &riyadh, mecca, params),
+            PrayerTimes::new(day, mecca, params)
+        );
     }
 
     #[test]
