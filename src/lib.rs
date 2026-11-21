@@ -37,6 +37,7 @@ pub use crate::models::high_altitude_rule::HighLatitudeRule;
 pub use crate::models::madhab::Madhab;
 pub use crate::models::method::Method;
 pub use crate::models::parameters::{AngleError, Configuration, DepressionAngle, Isha, Parameters};
+pub use crate::models::polar_circle_resolution::PolarCircleResolution;
 pub use crate::models::prayer::Prayer;
 pub use crate::schedule::{FIRST_DATE, LAST_DATE, PrayerTimes};
 pub use chrono::{
@@ -63,6 +64,8 @@ pub mod prelude {
     pub use crate::models::parameters::{
         AngleError, Configuration, DepressionAngle, Isha, Parameters,
     };
+    #[doc(no_inline)]
+    pub use crate::models::polar_circle_resolution::PolarCircleResolution;
     #[doc(no_inline)]
     pub use crate::models::prayer::Prayer;
     pub use crate::schedule::{FIRST_DATE, LAST_DATE, PrayerTimes};

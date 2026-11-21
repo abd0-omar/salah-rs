@@ -12,6 +12,7 @@ use super::adjustments::TimeAdjustment;
 use super::high_altitude_rule::HighLatitudeRule;
 use super::madhab::Madhab;
 use super::method::Method;
+use super::polar_circle_resolution::PolarCircleResolution;
 use super::prayer::Prayer;
 use super::rounding::Rounding;
 use super::shafaq::Shafaq;
@@ -106,6 +107,7 @@ pub struct Parameters {
     pub isha: Isha,
     pub madhab: Madhab,
     pub high_latitude_rule: HighLatitudeRule,
+    pub polar_circle_resolution: PolarCircleResolution,
     pub adjustments: TimeAdjustment,
     pub method_adjustments: TimeAdjustment,
     pub rounding: Rounding,
@@ -161,6 +163,7 @@ impl Configuration {
                 isha,
                 madhab: Madhab::Shafi,
                 high_latitude_rule: HighLatitudeRule::MiddleOfTheNight,
+                polar_circle_resolution: PolarCircleResolution::Unresolved,
                 adjustments: TimeAdjustment::default(),
                 method_adjustments: TimeAdjustment::default(),
                 rounding: Rounding::Nearest,
@@ -196,6 +199,14 @@ impl Configuration {
         high_latitude_rule: HighLatitudeRule,
     ) -> &mut Configuration {
         self.parameters.high_latitude_rule = high_latitude_rule;
+        self
+    }
+
+    pub fn polar_circle_resolution(
+        &mut self,
+        resolution: PolarCircleResolution,
+    ) -> &mut Configuration {
+        self.parameters.polar_circle_resolution = resolution;
         self
     }
 

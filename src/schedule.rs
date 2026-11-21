@@ -18,6 +18,7 @@ use crate::error::Error;
 use crate::models::coordinates::Coordinates;
 use crate::models::method::Method;
 use crate::models::parameters::{Isha, Parameters};
+use crate::models::polar_circle_resolution::PolarCircleResolution;
 use crate::models::prayer::Prayer;
 use crate::time::Moment;
 
@@ -99,9 +100,81 @@ struct Day {
 }
 
 impl Day {
+    /// The times of the solar day of `date`, or, where there are none
+    /// near the poles, those the polar circle resolution takes.
+    fn new(
+        date: NaiveDate,
+        coordinates: Coordinates,
+        parameters: &Parameters,
+    ) -> Result<Day, Error> {
+        Day::unresolved(date, coordinates, parameters).or_else(|error| match error {
+            Error::DateOutOfRange(_) => Err(error),
+            Error::SunNeverRises(_)
+            | Error::SunNeverSets(_)
+            | Error::NoAsr(_)
+            | Error::TimesOutOfOrder(_) => match parameters.polar_circle_resolution {
+                PolarCircleResolution::Unresolved => None,
+                PolarCircleResolution::AqrabBalad => {
+                    Day::nearest_latitude(date, coordinates, parameters)
+                }
+                PolarCircleResolution::AqrabYaum => Day::nearest_day(date, coordinates, parameters),
+            }
+            .ok_or(error),
+        })
+    }
+
+    /// The times of the nearest latitude toward the equator, in steps of
+    /// half a degree, that has them on `date`; at the equator the season is
+    /// the other hemisphere's, so the search stops there.
+    fn nearest_latitude(
+        date: NaiveDate,
+        coordinates: Coordinates,
+        parameters: &Parameters,
+    ) -> Option<Day> {
+        let steps = (coordinates.latitude.abs() / LATITUDE_STEP).ceil() as u32;
+        (1..=steps).find_map(|step| {
+            let latitude = (coordinates.latitude.abs() - f64::from(step) * LATITUDE_STEP).max(0.0)
+                * coordinates.latitude.signum();
+            let place = Coordinates {
+                latitude,
+                ..coordinates
+            };
+            Day::unresolved(date, place, parameters).ok()
+        })
+    }
+
+    /// The times of the nearest day that has them at the place, a day
+    /// after then a day before, up to half a year away, moved to `date`.
+    fn nearest_day(
+        date: NaiveDate,
+        coordinates: Coordinates,
+        parameters: &Parameters,
+    ) -> Option<Day> {
+        (1..=DAYS_SEARCHED)
+            .flat_map(|days| [days, -days])
+            .find_map(|days| {
+                let other = date.checked_add_signed(TimeDelta::days(days))?;
+                let day = Day::unresolved(other, coordinates, parameters).ok()?;
+                Some(day.shifted(-days * SECONDS_PER_DAY))
+            })
+    }
+
+    /// Every time `seconds` later.
+    fn shifted(self, seconds: i64) -> Day {
+        let [fajr, sunrise, dhuhr, asr, maghrib, isha] = self.times().map(|t| t.plus(seconds));
+        Day {
+            fajr,
+            sunrise,
+            dhuhr,
+            asr,
+            maghrib,
+            isha,
+        }
+    }
+
     /// The times of the solar day of `date`, which take the next day's
     /// sunrise for the length of the night.
-    fn new(
+    fn unresolved(
         date: NaiveDate,
         coordinates: Coordinates,
         parameters: &Parameters,
@@ -214,6 +287,12 @@ impl Day {
         }
     }
 }
+
+/// AqrabBalad's step toward the equator, in degrees (Adhan's).
+const LATITUDE_STEP: f64 = 0.5;
+/// AqrabYaum looks this many days either way: half a year.
+const DAYS_SEARCHED: i64 = 183;
+const SECONDS_PER_DAY: i64 = 86_400;
 
 /// The least time between one prayer time and the next (Adhan's).
 const MIN_GAP_SECONDS: i64 = 5 * 60;
@@ -630,6 +709,43 @@ mod tests {
             clock(&september),
             ["3:23", "4:46", "10:47", "14:05", "16:41", "17:55"]
         );
+    }
+
+    #[test]
+    fn polar_circle_resolutions() {
+        // Issue #20, PR #21: times for the midnight sun and the polar night
+        // from the nearest latitude or day that has them. Adhan's times.
+        let arctic = Coordinates::new(69.65, 18.96).unwrap();
+        let with = |resolution| {
+            let mut params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
+            params.polar_circle_resolution = resolution;
+            params
+        };
+        let balad = with(PolarCircleResolution::AqrabBalad);
+        let yaum = with(PolarCircleResolution::AqrabYaum);
+
+        let june = PrayerTimes::new(date(2026, 6, 21), arctic, balad).unwrap();
+        assert_eq!(
+            clock(&june),
+            ["22:46", "23:05", "10:47", "15:43", "22:26", "22:46"]
+        );
+        let december = PrayerTimes::new(date(2026, 12, 21), arctic, balad).unwrap();
+        assert_eq!(
+            clock(&december),
+            ["5:15", "9:10", "10:43", "10:51", "12:15", "16:00"]
+        );
+        let june = PrayerTimes::new(date(2026, 6, 21), arctic, yaum).unwrap();
+        assert_eq!(
+            clock(&june),
+            ["22:27", "23:05", "10:52", "15:38", "22:13", "22:51"]
+        );
+        let december = PrayerTimes::new(date(2026, 12, 21), arctic, yaum).unwrap();
+        assert_eq!(
+            clock(&december),
+            ["4:34", "8:59", "10:31", "10:35", "12:00", "16:12"]
+        );
+        // Fajr and sunrise on the evening before, UTC.
+        assert_eq!(june.time(Prayer::Fajr).date_naive(), date(2026, 6, 20));
     }
 
     #[test]
