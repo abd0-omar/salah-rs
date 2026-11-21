@@ -271,7 +271,9 @@ pub fn corrected_hour_angle(
         next_right_ascension,
     ) / 24.0;
     // Written so that NaN altitudes are no crossing too.
-    if !(altitude_at(transit).0 > h0) || !(altitude_at(lower_culmination).0 < h0) {
+    let above_at_transit = altitude_at(transit).0 > h0;
+    let below_at_lower_culmination = altitude_at(lower_culmination).0 < h0;
+    if !(above_at_transit && below_at_lower_culmination) {
         return f64::NAN;
     }
     // A bracket around the crossing: above h0 on the transit side, below
@@ -393,11 +395,11 @@ pub fn julian_century(julian_day: f64) -> f64 {
 
 // Checks if the given year is a leap year.
 pub fn is_leap_year(year: u32) -> bool {
-    if year % 4 != 0 {
+    if !year.is_multiple_of(4) {
         return false;
     }
 
-    if year % 100 == 0 && year % 400 != 0 {
+    if year.is_multiple_of(100) && !year.is_multiple_of(400) {
         return false;
     }
 
@@ -534,7 +536,7 @@ mod tests {
         let julian_day = julian_day(1992, 10, 13, 0.0);
         let julian_century = julian_century(julian_day);
 
-        assert_eq!(julian_century, -0.072183436002737855);
+        assert_eq!(julian_century, -0.072_183_436_002_737_86);
     }
 
     #[test]
@@ -554,7 +556,7 @@ mod tests {
         let apparent_solar_longitude =
             apparent_solar_longitude(julian_century, mean_solar_longitude).radians();
 
-        assert_eq!(apparent_solar_longitude, 3.4890691820452062);
+        assert_eq!(apparent_solar_longitude, 3.489_069_182_045_206);
     }
 
     #[test]
@@ -583,7 +585,7 @@ mod tests {
         let julian_century = julian_century(julian_day);
         let mean_solar_anomaly = mean_solar_anomaly(julian_century);
 
-        assert_eq!(mean_solar_anomaly.degrees, 278.99396643159753);
+        assert_eq!(mean_solar_anomaly.degrees, 278.993_966_431_597_5);
     }
 
     #[test]
@@ -653,12 +655,12 @@ mod tests {
             ascending_lunar_node,
         );
 
-        assert_eq!(nutation_obliq, -0.000092747500292341556);
+        assert_eq!(nutation_obliq, -0.000_092_747_500_292_341_56);
     }
 
     #[test]
     fn calculate_altitude_of_celestial_body() {
-        let coordinates = Coordinates::new(35.783333333333331, -78.650000000000006).unwrap();
+        let coordinates = Coordinates::new(35.783_333_333_333_33, -78.65).unwrap();
         let declination_angle = Angle::new(21.894701414701338);
         let local_hour_angle = Angle::new(108.09275357838322);
         let celestial_body = altitude_of_celestial_body(
@@ -667,6 +669,6 @@ mod tests {
             local_hour_angle,
         );
 
-        assert_eq!(celestial_body.degrees, -0.90061562155943208);
+        assert_eq!(celestial_body.degrees, -0.900_615_621_559_432_1);
     }
 }

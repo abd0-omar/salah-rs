@@ -76,9 +76,9 @@ impl SolarCoordinates {
         );
 
         SolarCoordinates {
-            declination: declination,
-            right_ascension: right_ascension,
-            apparent_sidereal_time: apparent_sidereal_time,
+            declination,
+            right_ascension,
+            apparent_sidereal_time,
         }
     }
 }
@@ -198,7 +198,9 @@ impl SolarTime {
             Angle::new(noon_declination),
             Angle::new(0.0),
         );
-        if !(angle.degrees > solar_semidiameter) || max_altitude.degrees < angle.degrees {
+        let disc_up = angle.degrees > solar_semidiameter;
+        let reached = max_altitude.degrees >= angle.degrees;
+        if !(disc_up && reached) {
             return None;
         }
         self.time_for_solar_angle(angle, true)
@@ -231,8 +233,11 @@ mod tests {
         let solar = SolarCoordinates::new(julian_day);
 
         assert_eq!(solar.declination.degrees, -7.7850685152648795);
-        assert_eq!(solar.right_ascension.degrees, 198.38082214251881);
-        assert_eq!(solar.right_ascension.unwound().degrees, 198.38082214251881);
+        assert_eq!(solar.right_ascension.degrees, 198.380_822_142_518_8);
+        assert_eq!(
+            solar.right_ascension.unwound().degrees,
+            198.380_822_142_518_8
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@ name = "salah"
 version = "0.7.6"
 authors = ["Farhan Ahmed <farhan@themacronaut.com>", "salah-rs contributors"]
 edition = "2024"
+rust-version = "1.87"
 description = "Islamic prayer time library for Rust"
 homepage = "https://github.com/sharno/salah-rs"
 repository = "https://github.com/sharno/salah-rs"

@@ -54,19 +54,15 @@ impl Angle {
         }
     }
 
+    /// The same direction in [-180, 180].
     pub fn quadrant_shifted(&self) -> Angle {
-        let angle: Angle;
-
-        if self.degrees >= -180.0 && self.degrees <= 180.0 {
-            // Nothing to do. Already initialized
-            // to the default value.
-            angle = self.clone();
+        if (-180.0..=180.0).contains(&self.degrees) {
+            *self
         } else {
-            let value = self.degrees - (360.0 * (self.degrees / 360.0).round());
-            angle = Angle { degrees: value };
+            Angle {
+                degrees: self.degrees - (360.0 * (self.degrees / 360.0).round()),
+            }
         }
-
-        angle
     }
 }
 

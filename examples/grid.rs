@@ -62,7 +62,7 @@ fn main() {
             ]
             .map(|p| t.time(p).timestamp().to_string())
             .join(","),
-            Err(_) => vec!["invalid"; 6].join(","),
+            Err(_) => ["invalid"; 6].join(","),
         };
         writeln!(out, "{line},{times}").unwrap();
     }
