@@ -195,9 +195,9 @@ pub fn corrected_transit(
     )
     .unwound();
     let angles = (plane_angle - longitude_angle - interpolated_angles).quadrant_shifted();
-    let angle_delta = angles / Angle::new(-360.0);
+    let angle_delta = angles.degrees / -360.0;
 
-    (approximate_transit + angle_delta.degrees) * 24.0
+    (approximate_transit + angle_delta) * 24.0
 }
 
 // When the sun's center is at `angle` (degrees above the horizon), before

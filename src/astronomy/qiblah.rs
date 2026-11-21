@@ -16,7 +16,9 @@ use crate::astronomy::unit::Angle;
 use crate::models::coordinates::Coordinates;
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug)]
+/// The direction of the Kaaba from a place: degrees clockwise from true
+/// north, in [0, 360).
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Qiblah(f64);
 
 impl Qiblah {

@@ -8,7 +8,7 @@
 #[allow(unused_imports)]
 use crate::math::Float;
 use core::f64::consts::PI;
-use core::ops::{Add, Div, Mul, Sub};
+use core::ops::{Add, Mul, Sub};
 
 pub trait Normalize {
     fn normalized_to_scale(&self, max: f64) -> f64;
@@ -92,20 +92,6 @@ impl Mul for Angle {
     fn mul(self, rhs: Angle) -> Angle {
         Angle {
             degrees: self.degrees * rhs.degrees,
-        }
-    }
-}
-
-impl Div for Angle {
-    type Output = Angle;
-
-    fn div(self, rhs: Angle) -> Angle {
-        if rhs.degrees == 0.0 {
-            panic!("Cannot divide by zero.");
-        }
-
-        Angle {
-            degrees: self.degrees / rhs.degrees,
         }
     }
 }

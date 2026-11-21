@@ -395,6 +395,19 @@ impl PrayerTimes {
         }
     }
 
+    /// The UTC date whose solar day these are the times of.
+    pub fn date(&self) -> NaiveDate {
+        self.date
+    }
+
+    pub fn coordinates(&self) -> Coordinates {
+        self.coordinates
+    }
+
+    pub fn parameters(&self) -> Parameters {
+        self.parameters
+    }
+
     /// The middle of the night, from Maghrib to the next Fajr.
     pub fn middle_of_the_night(&self) -> DateTime<Utc> {
         self.middle_of_the_night

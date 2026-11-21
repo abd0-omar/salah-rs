@@ -75,9 +75,9 @@ pub enum Method {
 
 /// A method's angles, offsets and rounding.
 struct Preset {
-    fajr: f64,
+    fajr: DepressionAngle,
     isha: Isha,
-    maghrib: Option<f64>,
+    maghrib: Option<DepressionAngle>,
     adjustments: TimeAdjustment,
     rounding: Rounding,
 }
@@ -100,7 +100,7 @@ const fn offsets(sunrise: i16, dhuhr: i16, asr: i16, maghrib: i16) -> TimeAdjust
 
 const fn preset(fajr: f64, isha: Isha, adjustments: TimeAdjustment) -> Preset {
     Preset {
-        fajr,
+        fajr: DepressionAngle::constant(fajr),
         isha,
         maghrib: None,
         adjustments,
@@ -109,40 +109,51 @@ const fn preset(fajr: f64, isha: Isha, adjustments: TimeAdjustment) -> Preset {
 }
 
 impl Method {
-    const fn preset(self) -> Preset {
+    /// Each arm is a `const` block, so the angles are checked when the
+    /// crate compiles.
+    fn preset(self) -> Preset {
         match self {
-            Method::MuslimWorldLeague => preset(18.0, angle(17.0), offsets(0, 1, 0, 0)),
-            Method::Egyptian => preset(19.5, angle(17.5), offsets(0, 1, 0, 0)),
-            Method::Karachi => preset(18.0, angle(18.0), offsets(0, 1, 0, 0)),
-            Method::UmmAlQura => preset(18.5, Isha::Interval(90), offsets(0, 0, 0, 0)),
-            Method::Dubai => preset(18.2, angle(18.2), offsets(-3, 3, 3, 3)),
-            Method::MoonsightingCommittee => preset(18.0, angle(18.0), offsets(0, 5, 0, 3)),
-            Method::NorthAmerica => preset(15.0, angle(15.0), offsets(0, 1, 0, 0)),
-            Method::Kuwait => preset(18.0, angle(17.5), offsets(0, 0, 0, 0)),
-            Method::Qatar => preset(18.0, Isha::Interval(90), offsets(0, 0, 0, 0)),
-            Method::Singapore => Preset {
-                rounding: Rounding::Up,
-                ..preset(20.0, angle(18.0), offsets(0, 1, 0, 0))
-            },
-            Method::Tehran => Preset {
-                maghrib: Some(4.5),
-                ..preset(17.7, angle(14.0), offsets(0, 0, 0, 0))
-            },
-            Method::Turkey => preset(18.0, angle(17.0), offsets(-7, 5, 4, 7)),
-            Method::Other => preset(0.0, angle(0.0), offsets(0, 0, 0, 0)),
+            Method::MuslimWorldLeague => const { preset(18.0, angle(17.0), offsets(0, 1, 0, 0)) },
+            Method::Egyptian => const { preset(19.5, angle(17.5), offsets(0, 1, 0, 0)) },
+            Method::Karachi => const { preset(18.0, angle(18.0), offsets(0, 1, 0, 0)) },
+            Method::UmmAlQura => const { preset(18.5, Isha::Interval(90), offsets(0, 0, 0, 0)) },
+            Method::Dubai => const { preset(18.2, angle(18.2), offsets(-3, 3, 3, 3)) },
+            Method::MoonsightingCommittee => {
+                const { preset(18.0, angle(18.0), offsets(0, 5, 0, 3)) }
+            }
+            Method::NorthAmerica => const { preset(15.0, angle(15.0), offsets(0, 1, 0, 0)) },
+            Method::Kuwait => const { preset(18.0, angle(17.5), offsets(0, 0, 0, 0)) },
+            Method::Qatar => const { preset(18.0, Isha::Interval(90), offsets(0, 0, 0, 0)) },
+            Method::Singapore => {
+                const {
+                    Preset {
+                        rounding: Rounding::Up,
+                        ..preset(20.0, angle(18.0), offsets(0, 1, 0, 0))
+                    }
+                }
+            }
+            Method::Tehran => {
+                const {
+                    Preset {
+                        maghrib: Some(DepressionAngle::constant(4.5)),
+                        ..preset(17.7, angle(14.0), offsets(0, 0, 0, 0))
+                    }
+                }
+            }
+            Method::Turkey => const { preset(18.0, angle(17.0), offsets(-7, 5, 4, 7)) },
+            Method::Other => const { preset(0.0, angle(0.0), offsets(0, 0, 0, 0)) },
         }
     }
 
     pub fn parameters(&self) -> Parameters {
         let preset = self.preset();
-        let mut configuration =
-            Configuration::new(DepressionAngle::constant(preset.fajr), preset.isha);
+        let mut configuration = Configuration::new(preset.fajr, preset.isha);
         configuration
             .method(*self)
             .method_adjustments(preset.adjustments)
             .rounding(preset.rounding);
         if let Some(maghrib) = preset.maghrib {
-            configuration.maghrib_angle(DepressionAngle::constant(maghrib));
+            configuration.maghrib_angle(maghrib);
         }
         configuration.done()
     }

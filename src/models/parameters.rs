@@ -43,7 +43,8 @@ impl DepressionAngle {
         }
     }
 
-    /// A method's angle, checked when the constant is built.
+    /// A method's angle, checked when the constant is built (only call it
+    /// in a `const` context).
     pub(crate) const fn constant(degrees: f64) -> Self {
         assert!(degrees >= 0.0 && degrees <= Self::MAX);
         DepressionAngle(degrees)
