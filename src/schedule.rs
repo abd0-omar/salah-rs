@@ -20,7 +20,7 @@ use crate::astronomy::unit::Angle;
 use crate::error::Error;
 use crate::models::coordinates::Coordinates;
 use crate::models::method::Method;
-use crate::models::parameters::{Isha, Parameters};
+use crate::models::parameters::{DepressionAngle, Isha, Parameters};
 use crate::models::polar_circle_resolution::PolarCircleResolution;
 use crate::models::prayer::Prayer;
 use crate::time::Moment;
@@ -88,6 +88,46 @@ impl SolarDay {
 
     fn afternoon(&self, shadow_length: f64) -> Option<Moment> {
         Moment::at_hours(self.date, self.solar.afternoon(shadow_length)?)
+    }
+}
+
+/// The sun's events a day's times are made of, to the second: the day's
+/// sunrise, transit and sunset, the next day's sunrise, and when the sun is
+/// at the method's angles (None when it never is, or isn't asked for).
+#[derive(Debug, Copy, Clone)]
+struct Events {
+    sunrise: Moment,
+    transit: Moment,
+    sunset: Moment,
+    tomorrow_sunrise: Moment,
+    fajr: Option<Moment>,
+    isha: Option<Moment>,
+    maghrib: Option<Moment>,
+    asr: Option<Moment>,
+}
+
+impl Events {
+    fn new(
+        date: NaiveDate,
+        coordinates: Coordinates,
+        parameters: &Parameters,
+    ) -> Result<Events, Error> {
+        let today = SolarDay::new(date, coordinates)?;
+        let tomorrow = SolarDay::new(next_day(date)?, coordinates)?;
+        let after_sunset = |angle: DepressionAngle| today.below_horizon(angle.degrees(), true);
+        Ok(Events {
+            sunrise: today.sunrise,
+            transit: today.transit,
+            sunset: today.sunset,
+            tomorrow_sunrise: tomorrow.sunrise,
+            fajr: today.below_horizon(parameters.fajr_angle.degrees(), false),
+            isha: match parameters.isha {
+                Isha::Angle(angle) => after_sunset(angle),
+                Isha::Interval(_) => None,
+            },
+            maghrib: parameters.maghrib_angle.and_then(after_sunset),
+            asr: today.afternoon(parameters.madhab.shadow().into()),
+        })
     }
 }
 
@@ -182,82 +222,88 @@ impl Day {
         coordinates: Coordinates,
         parameters: &Parameters,
     ) -> Result<Day, Error> {
-        let today = SolarDay::new(date, coordinates)?;
-        let tomorrow = SolarDay::new(next_day(date)?, coordinates)?;
-        let night = tomorrow.sunrise.since(today.sunset) as f64;
+        let events = Events::new(date, coordinates, parameters)?;
+        Day::from_events(&events, date, coordinates.latitude, parameters)
+    }
+
+    /// The rules that make the day's times of the sun's events: the
+    /// high-latitude and Moonsighting Committee bounds on Fajr and Isha,
+    /// Isha by interval, Tehran's Maghrib, and the order guard. Pure, and
+    /// total for any events (the Kani proofs take any).
+    fn from_events(
+        events: &Events,
+        date: NaiveDate,
+        latitude: f64,
+        parameters: &Parameters,
+    ) -> Result<Day, Error> {
+        let night = events.tomorrow_sunrise.since(events.sunset) as f64;
         let moonsighting = parameters.method == Method::MoonsightingCommittee;
-        let moonsighting_high = moonsighting && coordinates.latitude >= 55.0;
+        let moonsighting_high = moonsighting && latitude >= 55.0;
 
         let safe_fajr = if moonsighting {
-            today.sunrise.plus(ops::season_adjusted_morning_twilight(
-                coordinates.latitude,
+            events.sunrise.plus(ops::season_adjusted_morning_twilight(
+                latitude,
                 date.ordinal(),
                 date.year() as u32,
             ))
         } else {
-            today
+            events
                 .sunrise
                 .plus_fraction(-parameters.night_portion(parameters.fajr_angle) * night)
         };
         let fajr = if moonsighting_high {
-            Some(today.sunrise.plus_fraction(-night / 7.0))
+            Some(events.sunrise.plus_fraction(-night / 7.0))
         } else {
-            today.below_horizon(parameters.fajr_angle.degrees(), false)
+            events.fajr
         };
         let fajr = fajr
-            .filter(|&fajr| fajr >= safe_fajr && in_order(fajr, today.sunrise))
+            .filter(|&fajr| fajr >= safe_fajr && in_order(fajr, events.sunrise))
             .unwrap_or(safe_fajr);
 
         let isha = match parameters.isha {
-            Isha::Interval(minutes) => today.sunset.plus_minutes(minutes.into()),
+            Isha::Interval(minutes) => events.sunset.plus_minutes(minutes.into()),
             Isha::Angle(angle) => {
                 let safe_isha = if moonsighting {
-                    today.sunset.plus(ops::season_adjusted_evening_twilight(
-                        coordinates.latitude,
+                    events.sunset.plus(ops::season_adjusted_evening_twilight(
+                        latitude,
                         date.ordinal(),
                         date.year() as u32,
                         parameters.shafaq,
                     ))
                 } else {
-                    today
+                    events
                         .sunset
                         .plus_fraction(parameters.night_portion(angle) * night)
                 };
                 let isha = if moonsighting_high {
-                    Some(today.sunset.plus_fraction(night / 7.0))
+                    Some(events.sunset.plus_fraction(night / 7.0))
                 } else {
-                    today.below_horizon(angle.degrees(), true)
+                    events.isha
                 };
-                isha.filter(|&isha| isha <= safe_isha && in_order(today.sunset, isha))
+                isha.filter(|&isha| isha <= safe_isha && in_order(events.sunset, isha))
                     .unwrap_or(safe_isha)
             }
         };
 
         // Tehran's method: Maghrib when the sun is that far below the
         // horizon, if that is between sunset and Isha.
-        let maghrib = parameters
-            .maghrib_angle
-            .and_then(|angle| today.below_horizon(angle.degrees(), true))
-            .filter(|&maghrib| today.sunset < maghrib && maghrib < isha)
-            .unwrap_or(today.sunset);
+        let maghrib = events
+            .maghrib
+            .filter(|&maghrib| events.sunset < maghrib && maghrib < isha)
+            .unwrap_or(events.sunset);
 
         let day = Day {
             fajr,
-            sunrise: today.sunrise,
-            dhuhr: today.transit,
-            asr: today
-                .afternoon(parameters.madhab.shadow().into())
-                .ok_or(Error::NoAsr(date))?,
+            sunrise: events.sunrise,
+            dhuhr: events.transit,
+            asr: events.asr.ok_or(Error::NoAsr(date))?,
             maghrib,
             isha,
         };
         // Near the polar circles the times can crowd or cross; then there
         // are none (Adhan's guard).
-        match day
-            .times()
-            .windows(2)
-            .all(|pair| in_order(pair[0], pair[1]))
-        {
+        let times = day.times();
+        match times.iter().zip(&times[1..]).all(|(&a, &b)| in_order(a, b)) {
             true => Ok(day),
             false => Err(Error::TimesOutOfOrder(date)),
         }
