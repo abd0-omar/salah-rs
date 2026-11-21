@@ -14,17 +14,22 @@ angle (most of Europe around the June solstice), where it never rises or sets
 `current()` for any day but today. This fork keeps salah's calculations and
 attribution, and changes:
 
-- **Total API.** No input panics: every constructor and calculation returns
-  `Result` with a typed `Error`, coordinates and parameters are validated
-  types, and nothing reads the clock behind your back.
-- **Every known bug fixed**, each with a regression test (see the git log and
-  the list below).
-- **Verified.** Kani proofs that the public API can't panic and that its
-  results keep their invariants, property tests, and a differential test
-  against Adhan; see [VERIFICATION.md](VERIFICATION.md).
+- **A total API.** No input panics: the calculation returns `Result` with a
+  typed `Error`, coordinates and parameters are checked types, and nothing
+  reads the clock.
+- **Every known bug fixed**, each in its own commit with a regression test
+  (listed below).
+- **Verified.** Kani proofs that the API can't panic and that its results
+  keep their order, property tests over wide input ranges, and differential
+  tests against Adhan and NOAA's solar calculator; see
+  [VERIFICATION.md](VERIFICATION.md).
+- **Adhan's current algorithms**: the converged sunrise and twilight
+  iteration, the Asr checks, the order guard and the polar circle
+  resolutions of adhan-js, whose times it matches to the minute.
+- **`no_std`** (without std or an allocator), with the `libm` feature.
 
-It is not published to crates.io (the name `salah` there is the original).
-Use it from git:
+It is not published to crates.io (`salah` there is the original). Use it from
+git:
 
 ```toml
 [dependencies]
@@ -34,236 +39,142 @@ salah = { git = "https://github.com/sharno/salah-rs" }
 This fork is maintained with the help of an AI coding assistant; every change
 carries a test, and the proofs and checks in CI gate each commit.
 
+### What changed from salah 0.7
+
+Fixed (upstream issue or PR where there is one):
+
+- No times where the sun doesn't rise or set: `Error::SunNeverRises` /
+  `SunNeverSets` instead of a panic (#20), or times from the nearest latitude
+  or day with `PolarCircleResolution::AqrabBalad` / `AqrabYaum` (PR #21).
+- A twilight the sun never reaches gives way to the high-latitude rule (#18,
+  fixed upstream too).
+- A time that rounds up to 24:00 UTC is the next day's 00:00 (PR #26).
+- `current`, `next` and `time_remaining` take the time and return `Option`:
+  no panic before Fajr (PR #23) or on another day (#17); `Prayer::name` no
+  longer reads the clock to call Dhuhr Jumua.
+- Rounding happens once, at the end: `Rounding::Up` is a ceiling (Singapore's
+  times were often a minute late) and `Rounding::None` keeps the seconds.
+- Noon near the date line is on the date (Suva's times were a day late in
+  October and November); `PrayerTimes::on_local_date` gives a local day's
+  times where the zone is far from its meridian (Kiritimati).
+- Sunrise, sunset and twilights converge (one Newton step was up to 34
+  minutes off near the polar circles).
+- Asr uses the noon declination, and is an error where the sun can't reach it
+  (it was Dhuhr's time); times crowding near the polar circles are an error.
+- Tehran's 4.5° Maghrib angle is used (it was ignored).
+- The Moonsighting Committee's seasons in the southern hemisphere (an overflow,
+  and up to half an hour off).
+- The recommended high-latitude rule applies south of 48°S.
+- The next Fajr is the next day's own (it was unrounded); the middle of the
+  night is public.
+- Qiblah bearings stay in [0, 360).
+- Dates outside 1000–3000 are an error, not a panic; `Rounding`, `Shafaq` and
+  `Qiblah` are exported; `no_std` (#16).
+
+Changed API: `PrayerTimes::new(date, coordinates, parameters) -> Result`
+replaces the `PrayerSchedule` builder; `Coordinates::new` and
+`DepressionAngle::new` return `Result`; `Parameters` has `isha: Isha` (an
+angle or an interval), `maghrib_angle: Option<_>`, `polar_circle_resolution`,
+and `i16` adjustments.
+
 ## Usage
 
-Add the following to your `Cargo.toml` file under the `[dependencies]` section:
-
-```
-[dependencies]
-salah = "0.7.6"
-```
-
-If you need the output to be serialized/deserialized, you can use the `serde` feature in your `dependencies` section:
-
-```
-[dependencies]
-salah = { version = "0.7.6", features = ["serde"] }
-```
-
-To get prayer times, use the `PrayerSchedule` struct passing in coordinates, date, and calculation parameters.
-
 ```rust
 use salah::prelude::*;
 
-let new_york_city = Coordinates::new(40.7128, -74.0059);
-let date          = NaiveDate::from_ymd_opt(2019, 1, 25).expect("Invalid date provided");
-let params        = Configuration::with(Method::MoonsightingCommittee, Madhab::Hanafi);
-let prayers       = PrayerSchedule::new()
-                      .on(date)
-                      .for_location(new_york_city)
-                      .with_configuration(params)
-                      .calculate();
-```
+let makkah = Coordinates::new(21.4225, 39.8262).expect("valid coordinates");
+let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("a date");
+let params = Configuration::with(Method::UmmAlQura, Madhab::Shafi);
 
-### Initialization parameters
-
-#### Coordinates
-
-Create a `Coordinates` struct with the latitude and longitude for the location
-you want prayer times for.
-
-```rust
-let coordinates = Coordinates::new(40.7128, -74.0059);
-```
-
-#### Date
-
-To avoid confusion with timezones the date parameter passed in should be an instance of
-`NaiveDate`. The year, month, and day components need to be populated. All other
-components will be ignored.
-
-```rust
-let date = NaiveDate::from_ymd_opt(2019, 1, 25);
-```
-
-#### Configuration
-
-The calculation of the prayer times requires certain pieces of information. These can configured using the `Configuration` struct, a builder for the underlaying `Parameters` struct. This struct can be initialized by passing one of the `Method` enum variants (see below for the available variants) along with the one of the `Madhab` enum variants. You can then further customize the calculation parameters if needed.
-
-```rust
-let params = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
-```
-
-| Parameter            | Description                                                                                                                  |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `method`             | Which preset from the CalculationMethod enum was used. Default value is `other`.                                             |
-| `fajr_angle`         | Angle of the sun below the horizon used to calculate Fajr.                                                                   |
-| `maghrib_angle`      | Angle of the sun below the horizon used to calculate Maghrib, used for some Calculation Methods.                             |
-| `isha_angle`         | Angle of the sun below the horizon used to calculate Isha.                                                                   |
-| `isha_interval`      | Minutes after Maghrib (if set, the time for Isha will be Maghrib plus `isha_interval`).                                      |
-| `madhab`             | Which setting from the Madhab enum to use for calculating Asr.                                                               |
-| `high_latitude_rule` | Which setting from the HighLatitudeRule enum to use for calculating the minimum time for Fajr and the maximum time for Isha. |
-| `adjustments`        | PrayerAdjustments struct with custom prayer time adjustments in minutes for each prayer time.                                |
-| `rounding`           | The behavior for rounding prayer times. Either to nearest minute, to the higher minute, or none.                             |
-| `shafaq`             | Used by the MoonsightingCommittee method to determine how to calculate Isha. See explanation of values below.                |
-
-**Method**
-
-Provides preset configuration for a few authorities for calculating prayer times.
-
-| Value                   | Description                                                                                                                                                                                                                                                                                                     |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MuslimWorldLeague`     | Muslim World League. Standard Fajr time with an angle of 18°. Earlier Isha time with an angle of 17°.                                                                                                                                                                                                           |
-| `Egyptian`              | Egyptian General Authority of Survey. Early Fajr time using an angle 19.5° and a slightly earlier Isha time using an angle of 17.5°.                                                                                                                                                                            |
-| `Karachi`               | University of Islamic Sciences, Karachi. A generally applicable method that uses standard Fajr and Isha angles of 18°.                                                                                                                                                                                          |
-| `UmmAlQura`             | Umm al-Qura University, Makkah. Uses a fixed interval of 90 minutes from maghrib to calculate Isha. And a slightly earlier Fajr time with an angle of 18.5°. _Note: you should add a +30 minute custom adjustment for Isha during Ramadan._                                                                     |
-| `Dubai`                 | Used in the UAE. Slightly earlier Fajr time and slightly later Isha time with angles of 18.2° for Fajr and Isha in addition to 3 minute offsets for sunrise, Dhuhr, Asr, and Maghrib.                                                                                                                           |
-| `Qatar`                 | Same Isha interval as `ummAlQura` but with the standard Fajr time using an angle of 18°.                                                                                                                                                                                                                        |
-| `Kuwait`                | Standard Fajr time with an angle of 18°. Slightly earlier Isha time with an angle of 17.5°.                                                                                                                                                                                                                     |
-| `MoonsightingCommittee` | Method developed by Khalid Shaukat, founder of Moonsighting Committee Worldwide. Uses standard 18° angles for Fajr and Isha in addition to seasonal adjustment values. This method automatically applies the 1/7 approximation rule for locations above 55° latitude. Recommended for North America and the UK. |
-| `Singapore`             | Used in Singapore, Malaysia, and Indonesia. Early Fajr time with an angle of 20° and standard Isha time with an angle of 18°.                                                                                                                                                                                   |
-| `Turkey`                | An approximation of the Diyanet method used in Turkey. This approximation is less accurate outside the region of Turkey.                                                                                                                                                                                        |
-| `Tehran`                | Institute of Geophysics, University of Tehran. Early Isha time with an angle of 14°. Slightly later Fajr time with an angle of 17.7°. Calculates Maghrib based on the sun reaching an angle of 4.5° below the horizon.                                                                                          |
-| `NorthAmerica`          | Also known as the ISNA method. Can be used for North America, but the moonsightingCommittee method is preferable. Gives later Fajr times and early Isha times with angles of 15°.                                                                                                                               |
-| `Other`                 | Defaults to angles of 0°, should generally be used for making a custom method and setting your own values.                                                                                                                                                                                                      |
-
-**Madhab**
-
-Setting for the Asr prayer time. For Hanafi madhab, the Asr is bit later than that of the Shafi madhab.
-
-| Value    | Description                                                   |
-| -------- | ------------------------------------------------------------- |
-| `Shafi`  | Earlier Asr time (use for Shafi, Maliki, Hanbali, and Jafari) |
-| `Hanafi` | Later Asr time                                                |
-
-**HighLatitudeRule**
-
-Rule for approximating Fajr and Isha at high latitudes.
-
-| Value               | Description                                                                                                                                                                                                                                                                         |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MiddleOfTheNight`  | Fajr won't be earlier than the midpoint of the night and isha won't be later than the midpoint of the night. This is the default value to prevent fajr and isha crossing boundaries.                                                                                                |
-| `SeventhOfTheNight` | Fajr will never be earlier than the beginning of the last seventh of the night and Isha will never be later than the end of the first seventh of the night. This is recommended to use for locations above 48° latitude to prevent prayer times that would be difficult to perform. |
-| `TwilightAngle`     | The night is divided into portions of roughly 1/3. The exact value is derived by dividing the fajr/isha angles by 60. This can be used to prevent difficult fajr and isha times at certain locations.                                                                               |
-
-You can get the recommended High Latitude Rule for a location by calling the `recommended(coordinates:)` function and passing in the coordinates for the location.
-
-```rust
-let myCoordinates = Coordinates { latitude: 48.983226, longitude: -3.216649 };
-let highLatRule = HighLatitudeRule::recommended(myCoordinates);
-```
-
-**Shafaq**
-
-Shafaq is used by the MoonsightingCommittee method to determine what type of twilight to use in order to determine the time for Isha.
-
-| Value     | Description                                                                                                                                        |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `General` | General is a combination of Ahmer and Abyad. This is the defualt value and will provide more reasonable times for locations at higher latitudes.   |
-| `Ahmer`   | Ahmer means the twilight is the red glow in the sky. Used by the Shafi, Maliki, and Hanbali madhabs. This generally produces an earlier Isha time. |
-| `Abyad`   | Abyad means the twilight is the white glow in the sky. Used by the Hanafi madhab. This generally produces a later Isha time.                       |
-
-### Prayer Schedule
-
-The `PrayerSchedule` struct is a builder for the the `PrayerTimes` struct. Once the `calculate()` method is invoked on it, a `PrayerTime` struct will be initialized and it will contain fields
-for all five prayer times, the time for sunrise, and for the Qiyam prayer.
-
-The prayer time will be an instance of `DateTime<Utc>` and as such will refer to a fixed point in universal time. To display these times for the local timezone you will need to format them with the appropriate local time zone.
-
-This struct provides convenience methods for the prayer times to ease their usage and display.
-
-**PrayerTime**
-
-| Method                 | Description                                                                                                                                           |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name()`               | Returns the name of the payer transliterated in English.                                                                                              |
-| `time(prayer: Prayer)` | Returns the time of the prayer as a `DateTime<Utc>`. See the `DateTime` documentation for manipulating the return value.                              |
-| `current()`            | Returns the current prayer as the `Prayer` type.                                                                                                      |
-| `next()`               | Returns the next prayer as the `Prayer` type.                                                                                                         |
-| `time_remaining()`     | Returns a tuple with the _hours_ as its first element, and _minutes_ as its second element. The value is always in the context of the current prayer. |
-
-**Prayer**
-
-This is an enum and has variants for all prayers, including, _sunrise_ and _Qiyam_. This is single method available for this type called, `name()`, that will return the name of the prayer transliterated into English.
-
-## Full Example
-
-```rust
-use salah::prelude::*;
-
-let new_york_city = Coordinates::new(40.7128, -74.0059);
-let date          = NaiveDate::from_ymd_opt(2019, 1, 25).expect("Invalid date provided.");
-let params        = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
-let prayers       = PrayerSchedule::new()
-                        .on(date)
-                        .for_location(new_york_city)
-                        .with_configuration(params)
-                        .calculate();
-
-match prayers
-{
-    Ok(prayer) => {
-        println!("{}: {}", Prayer::Fajr.name(), prayer.time(Prayer::Fajr).format("%-l:%M %p").to_string());
-        println!("{}: {}", Prayer::Sunrise.name(), prayer.time(Prayer::Sunrise).format("%-l:%M %p").to_string());
-        println!("{}: {}", Prayer::Dhuhr.name(), prayer.time(Prayer::Dhuhr).format("%-l:%M %p").to_string());
-        println!("{}: {}", Prayer::Asr.name(), prayer.time(Prayer::Asr).format("%-l:%M %p").to_string());
-        println!("{}: {}", Prayer::Maghrib.name(), prayer.time(Prayer::Maghrib).format("%-l:%M %p").to_string());
-        println!("{}: {}", Prayer::Isha.name(), prayer.time(Prayer::Isha).format("%-l:%M %p").to_string());
-        println!("{}: {}", Prayer::Qiyam.name(), prayer.time(Prayer::Qiyam).format("%-l:%M %p").to_string());
-    },
-    Err(error) => println!("Could not calculate prayer times: {}", error)
+match PrayerTimes::new(date, makkah, params) {
+    Ok(times) => {
+        for prayer in [Prayer::Fajr, Prayer::Sunrise, Prayer::Dhuhr, Prayer::Asr, Prayer::Maghrib, Prayer::Isha] {
+            println!("{}: {}", prayer.name(), times.time(prayer).format("%H:%M UTC"));
+        }
+        // The prayer at a moment, and the next one.
+        let now = times.time(Prayer::Asr);
+        assert_eq!(times.current(now), Some(Prayer::Asr));
+        assert_eq!(times.next(now), Some(Prayer::Maghrib));
+        println!("Maghrib in {} minutes", times.time_remaining(now).unwrap().num_minutes());
+    }
+    Err(error) => println!("No prayer times: {error}"),
 }
 ```
 
-The output will be (in UTC):
+Times are `DateTime<Utc>`; show them in the place's time zone (with
+`chrono-tz`, say). `PrayerTimes::new` takes the solar day of a UTC date, whose
+noon is near 12:00 local mean time; where a zone keeps far from its meridian,
+`PrayerTimes::on_local_date(date, &zone, ..)` takes the day whose Dhuhr falls
+on the local date.
 
-```
-Fajr: 10:53 AM
-Sunrise: 12:12 PM
-Dhuhr: 5:09 PM
-Asr: 8:24 PM
-Maghrib: 10:05 PM
-Isha: 11:24 PM
-Qiyam: 6:37 AM
-```
+### Coordinates
 
-## Convenience Utilities
+Latitude in [-90°, 90°] and a finite longitude (wrapped into [-180°, 180°]),
+north and east positive. Anything else is a `CoordinatesError`.
 
-The `PrayerTimes` struct has functions for getting the current prayer and the next prayer. You can also get the time for a specified prayer, making it
-easier to dynamically show countdowns until the next prayer.
+### Configuration
+
+`Configuration::with(method, madhab)` gives a method's `Parameters`, whose
+fields can then be changed; `Configuration::new(fajr_angle, isha)` builds custom
+ones.
+
+| Field                     | Meaning                                                                                         |
+| ------------------------- | ----------------------------------------------------------------------------------------------- |
+| `method`                  | The preset these came from (`Other` for custom ones).                                           |
+| `fajr_angle`              | The sun's depression for Fajr: a `DepressionAngle`, 0° to 30°.                                  |
+| `maghrib_angle`           | `Some(angle)` for Maghrib at that depression rather than at sunset (Tehran).                    |
+| `isha`                    | `Isha::Angle(angle)`, or `Isha::Interval(minutes)` after sunset.                                |
+| `madhab`                  | `Shafi` (shadow 1×) or `Hanafi` (2×), for Asr.                                                  |
+| `high_latitude_rule`      | The bounds on Fajr and Isha where twilight lasts long (below).                                  |
+| `polar_circle_resolution` | What to do on a day without times near the poles (below).                                       |
+| `adjustments`             | `TimeAdjustment`: minutes added to each time.                                                   |
+| `rounding`                | `Nearest` minute (default), `Up` to the next minute, or `None` (to the second).                 |
+| `shafaq`                  | The Moonsighting Committee's twilight for Isha: `General`, `Ahmer` (red) or `Abyad` (white).    |
+
+**Methods**
+
+| Value                   | Fajr  | Isha            | Notes                                                                    |
+| ----------------------- | ----- | --------------- | ------------------------------------------------------------------------ |
+| `MuslimWorldLeague`     | 18°   | 17°             |                                                                          |
+| `Egyptian`              | 19.5° | 17.5°           |                                                                          |
+| `Karachi`               | 18°   | 18°             |                                                                          |
+| `UmmAlQura`             | 18.5° | 90 min          | Add 30 minutes to Isha in Ramadan.                                       |
+| `Dubai`                 | 18.2° | 18.2°           | Sunrise −3, Dhuhr, Asr, Maghrib +3 minutes.                              |
+| `MoonsightingCommittee` | 18°   | 18°             | Seasonal twilights; a seventh of the night above 55°N.                   |
+| `NorthAmerica`          | 15°   | 15°             | ISNA.                                                                    |
+| `Kuwait`                | 18°   | 17.5°           |                                                                          |
+| `Qatar`                 | 18°   | 90 min          |                                                                          |
+| `Singapore`             | 20°   | 18°             | Rounds up.                                                               |
+| `Tehran`                | 17.7° | 14°             | Maghrib at 4.5°.                                                         |
+| `Turkey`                | 18°   | 17°             | An approximation of Diyanet's.                                           |
+| `Other`                 | 0°    | 0°              | Placeholders, for custom parameters.                                     |
+
+**High-latitude rules**: `MiddleOfTheNight` (default): Fajr no earlier and Isha
+no later than the middle of the night; `SeventhOfTheNight`: no earlier than
+the last seventh, no later than the first; `TwilightAngle`: angle / 60 of the
+night. `HighLatitudeRule::recommended(coordinates)` is the seventh beyond 48°
+north or south.
+
+**Polar circle resolutions**: `Unresolved` (default): the `Error` that says why
+there are no times; `AqrabBalad`: the times of the nearest latitude toward
+the equator that has them; `AqrabYaum`: those of the nearest day that has
+them.
+
+### Qibla direction
 
 ```rust
-...
-let prayers = PrayerSchedule::new()
-                .on(date)
-                .for_location(new_york_city)
-                .with_configuration(params)
-                .calculate();
-let (hours, minutes) = prayers.current().time_remaining();
+use salah::prelude::*;
 
-println!("Current: {} ({}:{})", prayers.current().name, hours, minutes);
-println!("Next prayer is {} at {}.", prayers.next().name, prayers.time(prayer.next()).format("%-l:%M %p").to_string()));
+let paris = Coordinates::new(48.8566, 2.3522).expect("valid coordinates");
+let qiblah = Qiblah::new(paris);
+assert!((qiblah.value() - 119.163).abs() < 0.001); // degrees from true north
 ```
 
-### Qibla Direction
+### Features
 
-Get the direction, in degrees from North, of the Qibla from a given set of coordinates.
-
-```rust
-let new_york_city   = Coordinates::new(40.7128, -74.0059);
-let qiblah_direction = Qiblah::new(new_york_city);
-
-println!("Qiblah: {}", qibla_direction); //  Outputs: Qiblah: 58.4817
-```
-
-TO access that actual numerical (f64) value of the qiblah direction, you can use the `value()` method on the `Qiblah` instance.
-
-```rust
-let new_york_city   = Coordinates::new(40.7128, -74.0059);
-let qiblah_direction = Qiblah::new(new_york_city);
-
-println!("Qiblah: {}", qibla_direction.value()); //  Outputs: Qiblah: 58.48176358718943
-```
+- `std` (default). Without it the crate is `no_std` and needs `libm`:
+  `default-features = false, features = ["libm"]`.
+- `serde`: serialization; deserializing checks coordinates and angles.
 
 ## Contributing
 

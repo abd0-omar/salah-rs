@@ -13,16 +13,16 @@
 //! ```
 //! use salah::prelude::*;
 //!
-//! let new_york_city = Coordinates::new(40.7128, -74.0059).expect("valid coordinates");
+//! let istanbul      = Coordinates::new(41.0082, 28.9784).expect("valid coordinates");
 //! let date          = NaiveDate::from_ymd_opt(2019, 1, 25).expect("Invalid date provided");
-//! let params        = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
-//! let prayers       = PrayerTimes::new(date, new_york_city, params);
+//! let params        = Configuration::with(Method::Turkey, Madhab::Hanafi);
+//! let prayers       = PrayerTimes::new(date, istanbul, params);
 //!
 //! // Every setting can be changed: the rounding and shafaq types are public.
 //! let mut custom = Configuration::with(Method::MoonsightingCommittee, Madhab::Shafi);
 //! custom.rounding = Rounding::None;
 //! custom.shafaq = Shafaq::Ahmer;
-//! assert!(PrayerTimes::new(date, new_york_city, custom).is_ok());
+//! assert!(PrayerTimes::new(date, istanbul, custom).is_ok());
 //! ```
 //!
 //! ## Crate Features
@@ -37,6 +37,11 @@
 
 #[cfg(not(any(feature = "std", feature = "libm")))]
 compile_error!("salah needs the `std` feature, or `libm` for its math without std");
+
+/// The README's examples, run as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;
 
 mod astronomy;
 mod error;

@@ -5,6 +5,10 @@
 //! f64's math without std: the same names as std's inherent methods, from
 //! libm. With std the inherent methods are used, and this isn't built.
 
+// Newer toolchains' core has these methods too, inherent, so they win and
+// the trait goes unused; older ones (down to the crate's rust-version) need
+// it.
+#[allow(dead_code)]
 pub(crate) trait Float: Sized {
     fn sin(self) -> f64;
     fn cos(self) -> f64;
