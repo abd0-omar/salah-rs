@@ -33,8 +33,10 @@ pub enum HighLatitudeRule {
 }
 
 impl HighLatitudeRule {
+    /// Seventh of the night beyond 48° north or south, else the middle of
+    /// the night.
     pub fn recommended(coordinates: Coordinates) -> HighLatitudeRule {
-        if coordinates.latitude > 48.0 {
+        if coordinates.latitude.abs() > 48.0 {
             HighLatitudeRule::SeventhOfTheNight
         } else {
             HighLatitudeRule::MiddleOfTheNight
@@ -52,6 +54,17 @@ mod tests {
 
         assert_eq!(
             HighLatitudeRule::recommended(location),
+            HighLatitudeRule::SeventhOfTheNight
+        );
+    }
+
+    #[test]
+    fn recommended_rule_in_the_south() {
+        // salah 0.7 only looked north of 48°.
+        let south = Coordinates::new(-51.62, -69.22).unwrap();
+
+        assert_eq!(
+            HighLatitudeRule::recommended(south),
             HighLatitudeRule::SeventhOfTheNight
         );
     }
