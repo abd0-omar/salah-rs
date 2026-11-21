@@ -15,15 +15,19 @@ pub trait Normalize {
 }
 
 impl Normalize for f64 {
-    /// In [0, max) for a positive max, (max, 0] for a negative one, NaN
-    /// for NaN.
+    /// In [0, max) for a positive, finite max; NaN for a NaN or infinite
+    /// value. Computed as Adhan does (value - max * floor(value / max)), whose
+    /// rounding can land just outside the range: a tiny negative value
+    /// lands on max itself, a negative subnormal's quotient underflows and
+    /// leaves it below 0, and a value too large for its fraction to be
+    /// represented lands anywhere; those are brought back in.
     fn normalized_to_scale(&self, max: f64) -> f64 {
         let normalized = self - (max * (self / max).floor());
-        // A tiny negative value rounds up to max itself.
-        if normalized.abs() >= max.abs() {
-            0.0
-        } else {
-            normalized
+        match normalized {
+            n if (0.0..max).contains(&n) => n,
+            n if n.is_nan() => n,
+            n if (0.0..max).contains(&(n + max)) => n + max,
+            _ => 0.0,
         }
     }
 }
@@ -115,10 +119,6 @@ mod tests {
 
     #[test]
     fn normalize_value() {
-        assert_eq!(2.0_f64.normalized_to_scale(-5.0), -3.0);
-        assert_eq!((-4.0_f64).normalized_to_scale(-5.0), -4.0);
-        assert_eq!((-6.0_f64).normalized_to_scale(-5.0), -1.0);
-
         assert_eq!((-1.0_f64).normalized_to_scale(24.0), 23.0);
         assert_eq!(1.0_f64.normalized_to_scale(24.0), 1.0);
         assert_eq!(49.0_f64.normalized_to_scale(24.0), 1.0);
@@ -143,6 +143,9 @@ mod tests {
         // salah 0.7 unwound -1e-17° to 360°, a Qiblah bearing out of range.
         assert_eq!(Angle::new(-1e-17).unwound().degrees, 0.0);
         assert_eq!((-1e-17_f64).normalized_to_scale(1.0), 0.0);
+        // A negative subnormal's quotient underflows to -0.0: salah 0.7 (and
+        // the first fix) left the value itself, below 0. Found by Kani.
+        assert_eq!((-5e-324_f64).normalized_to_scale(360.0), 0.0);
     }
 
     #[test]
