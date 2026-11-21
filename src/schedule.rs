@@ -291,10 +291,13 @@ impl Day {
         };
 
         // Tehran's method: Maghrib when the sun is that far below the
-        // horizon, if that is between sunset and Isha.
+        // horizon, if that is after sunset and clear of Isha (where Isha is
+        // held to a share of a short night, the angle can crowd it, and the
+        // order guard below would take every time away; Adhan's takes the
+        // angle up to Isha itself).
         let maghrib = events
             .maghrib
-            .filter(|&maghrib| events.sunset < maghrib && maghrib < isha)
+            .filter(|&maghrib| events.sunset < maghrib && in_order(maghrib, isha))
             .unwrap_or(events.sunset);
 
         let day = Day {
@@ -887,6 +890,18 @@ mod tests {
             times.middle_of_the_night().format("%-k:%M").to_string(),
             "22:30"
         );
+    }
+
+    #[test]
+    fn tehrans_maghrib_gives_way_to_sunset_rather_than_crowd_isha() {
+        // In a short summer night the 4.5° Maghrib comes within minutes of
+        // an Isha held to a seventh of the night, and the day had no times.
+        let mut params = Configuration::with(Method::Tehran, Madhab::Shafi);
+        params.high_latitude_rule = HighLatitudeRule::SeventhOfTheNight;
+        let north = Coordinates::new(58.82, 0.0).unwrap();
+        let times = PrayerTimes::new(date(2026, 7, 6), north, params).unwrap();
+        let gap = times.time(Prayer::Isha) - times.time(Prayer::Maghrib);
+        assert!(gap >= TimeDelta::minutes(5), "{gap}");
     }
 
     #[test]
