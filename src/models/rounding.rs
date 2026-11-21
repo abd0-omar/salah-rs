@@ -8,8 +8,12 @@ use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(PartialEq, Debug, Copy, Clone)]
+/// How the times are rounded to the minute.
 pub enum Rounding {
+    /// To the nearest minute, half a minute up.
     Nearest,
+    /// To the next minute; a time on a minute stays.
     Up,
+    /// Not at all: to the second.
     None,
 }

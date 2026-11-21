@@ -17,6 +17,12 @@
 //! let date          = NaiveDate::from_ymd_opt(2019, 1, 25).expect("Invalid date provided");
 //! let params        = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
 //! let prayers       = PrayerTimes::new(date, new_york_city, params);
+//!
+//! // Every setting can be changed: the rounding and shafaq types are public.
+//! let mut custom = Configuration::with(Method::MoonsightingCommittee, Madhab::Shafi);
+//! custom.rounding = Rounding::None;
+//! custom.shafaq = Shafaq::Ahmer;
+//! assert!(PrayerTimes::new(date, new_york_city, custom).is_ok());
 //! ```
 //!
 //! ## Crate Features
@@ -40,6 +46,7 @@ mod models;
 mod schedule;
 mod time;
 
+pub use crate::astronomy::qiblah::Qiblah;
 pub use crate::error::Error;
 pub use crate::models::adjustments::{Adjustment, TimeAdjustment};
 pub use crate::models::coordinates::{Coordinates, CoordinatesError};
@@ -49,6 +56,8 @@ pub use crate::models::method::Method;
 pub use crate::models::parameters::{AngleError, Configuration, DepressionAngle, Isha, Parameters};
 pub use crate::models::polar_circle_resolution::PolarCircleResolution;
 pub use crate::models::prayer::Prayer;
+pub use crate::models::rounding::Rounding;
+pub use crate::models::shafaq::Shafaq;
 pub use crate::schedule::{FIRST_DATE, LAST_DATE, PrayerTimes};
 pub use chrono::{
     DateTime, Datelike, Duration, NaiveDate, TimeDelta, TimeZone, Timelike, Utc, Weekday,
@@ -57,28 +66,11 @@ pub use chrono::{
 /// A convenience module appropriate for glob imports (`use salah::prelude::*;`).
 pub mod prelude {
     #[doc(no_inline)]
-    pub use crate::astronomy::qiblah::Qiblah;
-    #[doc(no_inline)]
-    #[doc(no_inline)]
-    pub use crate::error::Error;
-    #[doc(no_inline)]
-    pub use crate::models::adjustments::{Adjustment, TimeAdjustment};
-    pub use crate::models::coordinates::{Coordinates, CoordinatesError};
-    #[doc(no_inline)]
-    pub use crate::models::high_altitude_rule::HighLatitudeRule;
-    #[doc(no_inline)]
-    pub use crate::models::madhab::Madhab;
-    #[doc(no_inline)]
-    pub use crate::models::method::Method;
-    #[doc(no_inline)]
-    pub use crate::models::parameters::{
-        AngleError, Configuration, DepressionAngle, Isha, Parameters,
+    pub use crate::{
+        Adjustment, AngleError, Configuration, Coordinates, CoordinatesError, DepressionAngle,
+        Error, FIRST_DATE, HighLatitudeRule, Isha, LAST_DATE, Madhab, Method, Parameters,
+        PolarCircleResolution, Prayer, PrayerTimes, Qiblah, Rounding, Shafaq, TimeAdjustment,
     };
-    #[doc(no_inline)]
-    pub use crate::models::polar_circle_resolution::PolarCircleResolution;
-    #[doc(no_inline)]
-    pub use crate::models::prayer::Prayer;
-    pub use crate::schedule::{FIRST_DATE, LAST_DATE, PrayerTimes};
     #[doc(no_inline)]
     pub use chrono::{
         DateTime, Datelike, Duration, NaiveDate, TimeDelta, TimeZone, Timelike, Utc, Weekday,
