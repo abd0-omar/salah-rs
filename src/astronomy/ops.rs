@@ -499,24 +499,20 @@ pub fn season_adjusted_evening_twilight(latitude: f64, day: u32, year: u32, shaf
     round_half_up(adjustment * 60.0)
 }
 
-// Solstice calculation to determine a date's seasonal progression.
-// Used in the Moonsighting Committee calculation method.
+// Days since the winter solstice (the northern one's about 10 days before
+// the year begins, the southern one's day 172 or 173): a date's seasonal
+// progression, for the Moonsighting Committee method.
 pub fn days_since_solstice(day_of_year: u32, year: u32, latitude: f64) -> u32 {
     let days_in_year = if is_leap_year(year) { 366 } else { 365 };
-
-    if latitude >= 0.0 {
-        let northern_offset = 10;
-        let lapsed_days = day_of_year + northern_offset;
-
-        if lapsed_days >= days_in_year {
-            lapsed_days - days_in_year
-        } else {
-            lapsed_days
-        }
+    let solstice_offset: i64 = if latitude >= 0.0 {
+        -10
+    } else if is_leap_year(year) {
+        173
     } else {
-        let southern_offset = if is_leap_year(year) { 173 } else { 172 };
-        (day_of_year - southern_offset) + days_in_year
-    }
+        172
+    };
+
+    (i64::from(day_of_year) - solstice_offset).rem_euclid(days_in_year) as u32
 }
 
 #[cfg(test)]

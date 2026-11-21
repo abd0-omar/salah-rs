@@ -605,6 +605,26 @@ mod tests {
     }
 
     #[test]
+    fn moonsighting_seasons_in_the_southern_hemisphere() {
+        // salah 0.7 counted the days since the southern solstice as
+        // day - 172 + 365 in u32: an overflow panic before late June (in a
+        // debug build), and a year too many after it. Adhan's times.
+        let params = Configuration::with(Method::MoonsightingCommittee, Madhab::Shafi);
+        let cape_town = Coordinates::new(-33.92, 18.42).unwrap();
+        let january = PrayerTimes::new(date(2026, 1, 15), cape_town, params).unwrap();
+        let september = PrayerTimes::new(date(2026, 9, 15), cape_town, params).unwrap();
+
+        assert_eq!(
+            clock(&january),
+            ["2:11", "3:51", "11:01", "14:40", "18:03", "19:14"]
+        );
+        assert_eq!(
+            clock(&september),
+            ["3:23", "4:46", "10:47", "14:05", "16:41", "17:55"]
+        );
+    }
+
+    #[test]
     fn dates_outside_the_supported_years_are_errors() {
         // salah 0.7 panicked in its date arithmetic at chrono's last date.
         let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
